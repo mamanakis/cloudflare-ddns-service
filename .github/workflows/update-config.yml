@@ -1,0 +1,33 @@
+name: Update KV Configuration
+
+on:
+  push:
+    paths:
+      - 'config.json'
+    branches:
+      - main
+
+jobs:
+  update-kv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Push config.json to Cloudflare KV
+        run: |
+          echo "Uploading config.json to Cloudflare KV Namespace..."
+          
+          RESPONSE_CODE=$(curl -s -o response.json -w "%{http_code}" -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/ddns_config" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d @config.json)
+            
+          if [ "$RESPONSE_CODE" -eq 200 ]; then
+            echo "✅ Configuration successfully updated in Cloudflare KV!"
+          else
+            echo "❌ Failed to update KV. HTTP Status: $RESPONSE_CODE"
+            cat response.json
+            exit 1
+          fi
