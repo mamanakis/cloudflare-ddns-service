@@ -29,7 +29,7 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/ddns_config" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d @payload.json)
+            -d @config.json)
             
           if [ "$RESPONSE_CODE" -eq 200 ]; then
             echo "✅ Configuration successfully updated in Cloudflare KV!"
