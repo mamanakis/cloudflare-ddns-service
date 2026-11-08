@@ -38,6 +38,7 @@ services:
         echo "API_TOKEN=$$API_TOKEN" > .dev.vars
         echo "USERNAME=$$USERNAME" >> .dev.vars
         echo "PASSWORD=$$PASSWORD" >> .dev.vars
+        echo "TEST_PREFIXES=$$TEST_PREFIXES" >> .dev.vars
         
         echo "Starting Wrangler dev server..."
         wrangler dev --ip 0.0.0.0
