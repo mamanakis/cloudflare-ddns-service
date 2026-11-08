@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  wrangler:
+    image: node:22-alpine
+    container_name: omada-ddns-dev
+    working_dir: /app
+    volumes:
+      # Mount the current project directory into the container
+      - ./:/app
+    ports:
+      # Expose Wrangler's default dev port to your host machine
+      - "8787:8787"
+    environment:
+      # Prevents Wrangler from trying to open a browser window or asking for telemetry
+      - CI=true
+      - WRANGLER_SEND_METRICS=false
+    command: >
+      sh -c "npm install -g wrangler && wrangler dev --ip 0.0.0.0"
