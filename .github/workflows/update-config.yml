@@ -14,15 +14,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Push config.json to Cloudflare KV
+      - name: Inject Secret Prefixes and Push to Cloudflare
+        env:
+          # Pass the secret securely into the environment
+          SECRET_PREFIXES: ${{ secrets.SECRET_PREFIXES }}
         run: |
-          echo "Uploading config.json to Cloudflare KV Namespace..."
+          echo "Injecting private prefixes into configuration..."
+          
+          # Use jq to replace the empty array with your secret array
+          jq --argjson prefixes "$SECRET_PREFIXES" '.ALLOW_LIST_PREFIXES = $prefixes' config.json > payload.json
+          
+          echo "Uploading injected configuration to Cloudflare KV Namespace..."
           
           RESPONSE_CODE=$(curl -s -o response.json -w "%{http_code}" -X PUT \
             "https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/ddns_config" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d @config.json)
+            -d @payload.json)
             
           if [ "$RESPONSE_CODE" -eq 200 ]; then
             echo "✅ Configuration successfully updated in Cloudflare KV!"
