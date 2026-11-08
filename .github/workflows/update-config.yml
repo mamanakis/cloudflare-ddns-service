@@ -4,8 +4,8 @@ on:
   push:
     paths:
       - 'config.json'
-    branches:
-      - main
+  workflow_dispatch:
+  workflow_call:   
 
 jobs:
   update-kv:
