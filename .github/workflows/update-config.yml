@@ -14,15 +14,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Inject Secret Prefixes and Push to Cloudflare
+      - name: Inject Allowed Prefixes into config.json
         env:
-          # Pass the secret securely into the environment
-          SECRET_PREFIXES: ${{ secrets.SECRET_PREFIXES }}
+          PREFIX_LIST: ${{ vars.ALLOWED_PREFIXES }}
         run: |
-          echo "Injecting private prefixes into configuration..."
+          echo "Injecting allowed prefixes into configuration..."
           
           # Use jq to replace the empty array with your secret array
-          jq --argjson prefixes "$SECRET_PREFIXES" '.ALLOW_LIST_PREFIXES = $prefixes' config.json > payload.json
+          jq --arg prefixes "$PREFIX_LIST" '.ALLOW_LIST_PREFIXES = (if $prefixes == "" then [] else ($prefixes | split(",")) end)' config.json > config.tmp.json && mv config.tmp.json config.json
           
           echo "Uploading injected configuration to Cloudflare KV Namespace..."
           
