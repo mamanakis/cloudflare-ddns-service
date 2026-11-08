@@ -10,19 +10,33 @@ A highly secure, serverless Dynamic DNS (DDNS) updater designed for TP-Link Omad
 ## Features
 * **Native Omada Support:** Uses standard HTTP Basic Authentication and Omada's `[DOMAIN]` variables.
 * **Serverless Edge:** Runs entirely on Cloudflare Workers (no VPS, no local IdP dependencies).
+* **Modular ES Architecture:** Cleanly separated logic (`config.js`, `security.js`, `validation.js`, `cloudflare.js`) for easy testing and expansion.
+* **Idempotent Updates:** Compares incoming IP to existing Cloudflare records and skips unnecessary API writes to reduce log noise.
 * **GitOps Configuration:** Update allowlists, blocklists, and limits via `config.json` without redeploying the Worker.
 * **Progressive Rate Limiting:** Built-in protection against brute-force attacks with progressive timeout penalties (e.g., 1hr, 10hr, 100hr blocks) stored in Cloudflare KV.
 * **Dynamic Record Creation:** Can optionally create new DNS records on the fly if they don't already exist.
-* **Granular Security:** Restrict DDNS updates to specific domains, specific prefixes, and block profanity.
+* **Granular Security:** Restrict DDNS updates to specific domains, specific prefixes (including wildcards), and block profanity.
 
 ## Repository Structure
 This repository uses a GitOps workflow. The GitHub Actions automatically separate code deployments from configuration updates.
 
-* `worker.js`: The core Cloudflare Worker script.
-* `wrangler.toml`: Cloudflare infrastructure bindings.
-* `config.json`: Dynamic allowlists/blocklists pushed directly to Cloudflare KV.
-* `.github/workflows/deploy-worker.yml`: Deploys the worker (triggers only on code changes).
-* `.github/workflows/update-config.yml`: Updates the KV store (triggers only on config changes).
+```text
+omada-cloudflare-ddns/
+├── .github/
+│   └── workflows/
+│       ├── deploy-worker.yml   # Triggers on changes to src/ or wrangler.toml
+│       └── update-config.yml   # Triggers on changes to config.json
+├── src/
+│   ├── index.js                # Main Worker entry point
+│   ├── config.js               # KV configuration fetcher
+│   ├── security.js             # Rate limiting and HTTP Basic Auth
+│   ├── validation.js           # Hostname constraints and regex
+│   └── cloudflare.js           # Cloudflare API operations & Webhooks
+├── .gitignore
+├── config.json                 # Dynamic allowlists/blocklists for KV
+├── README.md
+└── wrangler.toml               # Infrastructure bindings
+```
 
 ## Prerequisites
 1. A Cloudflare Account with an active domain zone.
@@ -59,11 +73,11 @@ In your GitHub repository, navigate to **Settings > Secrets and variables > Acti
 * `PASSWORD`: A secure custom password for your router.
 
 ### 3. Repository Configuration
-Update the `wrangler.toml` file in this repository with your KV Namespace ID:
+Update the `wrangler.toml` file in this repository with your KV Namespace ID. Note that `main` must point to the `src/index.js` file:
 
 ```toml
 name = "omada-cloudflare-ddns"
-main = "worker.js"
+main = "src/index.js"
 compatibility_date = "2024-01-01"
 
 [[kv_namespaces]]
