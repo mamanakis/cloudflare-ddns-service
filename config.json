@@ -4,9 +4,13 @@
   "BASE_PENALTY_SECONDS": 3600,
   "MAX_PENALTY_SECONDS": 3600000,
   "ALLOW_CREATION": true,
-  "ALLOW_LIST_DOMAINS": [".example.com", ".ddns.example.com"],
-  "ALLOW_LIST_PREFIXES": ["router", "gateway", "home", "user1", "user2"],
+  "ALLOW_LIST_DOMAINS": {
+    ".mamanakis.net": "a2d8bc4d19076082a2709a261da5dbd2",
+    ".mamanakis.com": "aa93a0da2dde746028171d4bfa2da01a",
+    ".mamanakis.org": "97cea0873fc2ef6d9611ab8493fda9a9"
+  },
+  "ALLOW_LIST_PREFIXES": [],
   "BLOCK_LIST": ["admin", "root", "test", "hack"],
   "MAX_ZONE_RECORDS": 150,
-  "ALERT_WEBHOOK_URL": ""
+  "ALERT_WEBHOOK_URL": "" 
 }
