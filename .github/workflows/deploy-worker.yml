@@ -1,9 +1,10 @@
 name: Deploy Worker
 
 on:
+  workflow_dispatch: 
   push:
     paths:
-      - 'worker.js'
+      - 'src/**'
       - 'wrangler.toml'
     branches:
       - main
