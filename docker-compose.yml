@@ -1,19 +1,45 @@
 version: '3.8'
 
 services:
-  wrangler:
+  wrangler-dev:
     image: node:22-alpine
     container_name: omada-ddns-dev
+    # We work inside a dedicated app folder
     working_dir: /app
     volumes:
-      # Mount the current project directory into the container
-      - ./:/app
+      # Mounts the local ./workspace directory to /app in the container.
+      # The code will be cloned here so you can access it from your host.
+      - ./workspace:/app
     ports:
-      # Expose Wrangler's default dev port to your host machine
       - "8787:8787"
+    env_file:
+      - .env
     environment:
-      # Prevents Wrangler from trying to open a browser window or asking for telemetry
       - CI=true
       - WRANGLER_SEND_METRICS=false
-    command: >
-      sh -c "npm install -g wrangler && wrangler dev --ip 0.0.0.0"
+    # The pipe (|) allows us to write a clean multi-line shell script.
+    # The double dollar signs ($$) prevent Docker Compose from evaluating the variables prematurely.
+    command: |
+      sh -c '
+        echo "Installing dependencies..."
+        apk add --no-cache git > /dev/null 2>&1
+        npm install -g wrangler > /dev/null 2>&1
+        
+        # Clone the repo if it does not exist in the mounted volume
+        if [ ! -f "wrangler.toml" ]; then
+          echo "Workspace empty. Cloning repository..."
+          git clone "$$GIT_REPO_URL" .
+        else
+          echo "Repository found. Skipping clone."
+        fi
+        
+        # Generate the .dev.vars file required by Wrangler for local secrets
+        echo "Injecting secrets into .dev.vars..."
+        echo "API_TOKEN=$$API_TOKEN" > .dev.vars
+        echo "ZONE_ID=$$ZONE_ID" >> .dev.vars
+        echo "USERNAME=$$USERNAME" >> .dev.vars
+        echo "PASSWORD=$$PASSWORD" >> .dev.vars
+        
+        echo "Starting Wrangler dev server..."
+        wrangler dev --ip 0.0.0.0
+      '
