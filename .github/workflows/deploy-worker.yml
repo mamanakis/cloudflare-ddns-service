@@ -32,3 +32,7 @@ jobs:
           API_TOKEN: ${{ secrets.API_TOKEN }}
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
+  update-kv:
+    needs: deploy # Ensures the worker is successfully deployed before pushing the config
+    uses: ./.github/workflows/update-config.yml
+    secrets: inherit
