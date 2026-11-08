@@ -16,6 +16,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Inject KV Namespace ID
+        run: sed -i "s/YOUR_KV_NAMESPACE_ID/${{ secrets.CF_KV_NAMESPACE_ID }}/g" wrangler.toml
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
