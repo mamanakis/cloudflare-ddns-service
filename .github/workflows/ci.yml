@@ -163,14 +163,14 @@ jobs:
 
           echo "--- Test 3: Seed temporary user and verify unauthorized host returns 403 nohost ---"
           HASH=$(printf "cisalt12citoken123456789" | sha256sum | awk '{print $1}')
-          USER_JSON=$(jq -nc --arg id "$TEST_USER" --arg h "$HASH" '{
+          USER_JSON=$(jq -nc --arg id "$TEST_USER" --arg h "$HASH" --arg domain "$DOMAIN" '{
             id: $id,
             salt: "cisalt12",
             secret_hash: $h,
-            allowed_exact: ["ci-allowed.${DOMAIN}"],
+            allowed_exact: [("ci-allowed." + $domain)],
             allowed_suffixes: []
           }')
-          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="${{ steps.kv.outputs.id }}" --remote
+          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="$KV_ID" --remote
 
           sleep 2
           HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-forbidden.${DOMAIN}")
