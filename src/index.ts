@@ -108,7 +108,6 @@ export async function ddnsHandler(
   const url = new URL(request.url);
 
   // 1. Domain-Agnostic Onboarding Subdomain (matches onboard-ddns.*)
-  // 1. Domain-Agnostic Onboarding Subdomain (matches onboard-ddns.*)
   if (isOnboardRequest(request, url, env)) {
     if ((url.pathname === "/" || url.pathname === "/onboard") && request.method === "POST") {
       return handleOnboardSubmit(request, env, ctx);
@@ -121,19 +120,6 @@ export async function ddnsHandler(
       return new Response(ONBOARD_HTML, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
       });
-    }
-
-    return new Response(null, { status: 404 });
-  }
-
-    if (url.pathname === "/" && request.method === "GET") {
-      return new Response(ONBOARD_HTML, {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-      });
-    }
-
-    if ((url.pathname === "/" || url.pathname === "/onboard") && request.method === "POST") {
-      return handleOnboardSubmit(request, env, ctx);
     }
 
     return new Response(null, { status: 404 });
