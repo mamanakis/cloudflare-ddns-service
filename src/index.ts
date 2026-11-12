@@ -30,8 +30,8 @@ async function resolveZoneAndConfig(
   env: Env
 ): Promise<{ zoneId: string | null; serviceConfig: ServiceConfig | null }> {
   const [zoneMap, serviceConfig] = await Promise.all([
-    env.DDNS_KV.get<Record<string, string>>("zone:map", "json"),
-    env.DDNS_KV.get<ServiceConfig>("config:settings", "json"),
+    env.KV.get<Record<string, string>>("zone:map", "json"),
+    env.KV.get<ServiceConfig>("config:settings", "json"),
   ]);
 
   const combinedDomains: Record<string, string> = {
@@ -106,7 +106,7 @@ export async function ddnsHandler(
 
   // 1. Domain-Agnostic Onboarding Subdomain (matches onboard-ddns.*)
   if (isOnboardRequest(url, env)) {
-    if (!(await hasActiveInvite(env.DDNS_KV))) {
+    if (!(await hasActiveInvite(env.KV))) {
       return new Response(null, { status: 404 });
     }
 
@@ -133,7 +133,7 @@ export async function ddnsHandler(
       });
     }
 
-    const user = await authenticateUserByKey(creds, env.DDNS_KV);
+    const user = await authenticateUserByKey(creds, env.KV);
     if (!user) return textResponse("badauth", 403);
 
     const rawHost = url.searchParams.get("hostname");

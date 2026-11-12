@@ -10,7 +10,7 @@
   },
   "kv_namespaces": [
     {
-      "binding": "DDNS_KV"
+      "binding": "KV"
     }
   ]
 }

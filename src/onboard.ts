@@ -45,7 +45,7 @@ export async function handleOnboardSubmit(
   const country = request.headers.get("CF-IPCountry") || "unknown";
   const userAgent = request.headers.get("User-Agent") || "unknown";
 
-  const isBlocked = await env.DDNS_KV.get(`blocked_ip:${clientIp}`);
+  const isBlocked = await env.KV.get(`blocked_ip:${clientIp}`);
   if (isBlocked !== null) {
     return jsonResponse({ error: "Access denied." }, 403);
   }
@@ -69,15 +69,15 @@ export async function handleOnboardSubmit(
   const userKey = `user:${username}`;
 
   const [inviteWithMeta, existingUser] = await Promise.all([
-    env.DDNS_KV.getWithMetadata<InviteRecord, { exp?: number }>(inviteKey, "json"),
-    env.DDNS_KV.get<UserRule>(userKey, "json"),
+    env.KV.getWithMetadata<InviteRecord, { exp?: number }>(inviteKey, "json"),
+    env.KV.get<UserRule>(userKey, "json"),
   ]);
 
   const invite = inviteWithMeta.value;
 
   if (!invite) {
     ctx.waitUntil(
-      writeAuditLog(env.DDNS_KV, {
+      writeAuditLog(env.KV, {
         timestamp: new Date().toISOString(),
         event: "unknown_or_expired_invite",
         username,
@@ -97,9 +97,9 @@ export async function handleOnboardSubmit(
     const attempts = (invite.attempts || 0) + 1;
 
     if (attempts >= MAX_PIN_ATTEMPTS) {
-      await env.DDNS_KV.delete(inviteKey);
+      await env.KV.delete(inviteKey);
       ctx.waitUntil(
-        writeAuditLog(env.DDNS_KV, {
+        writeAuditLog(env.KV, {
           timestamp: new Date().toISOString(),
           event: "invite_burned_max_attempts",
           username,
@@ -119,7 +119,7 @@ export async function handleOnboardSubmit(
       : DEFAULT_INVITE_TTL_SECONDS;
 
     invite.attempts = attempts;
-    await env.DDNS_KV.put(inviteKey, JSON.stringify(invite), {
+    await env.KV.put(inviteKey, JSON.stringify(invite), {
       expirationTtl: remainingTtl,
       metadata: inviteWithMeta.metadata,
     });
@@ -153,12 +153,12 @@ export async function handleOnboardSubmit(
   };
 
   await Promise.all([
-    env.DDNS_KV.put(userKey, JSON.stringify(newUser, null, 2)),
-    env.DDNS_KV.delete(inviteKey),
+    env.KV.put(userKey, JSON.stringify(newUser, null, 2)),
+    env.KV.delete(inviteKey),
   ]);
 
   ctx.waitUntil(
-    writeAuditLog(env.DDNS_KV, {
+    writeAuditLog(env.KV, {
       timestamp: new Date().toISOString(),
       event: "onboard_success",
       username,

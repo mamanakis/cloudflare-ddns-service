@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BINDING="DDNS_KV"
+BINDING="KV"
 
-# Auto-discover KV Namespace ID if omitted from wrangler.jsonc (Wrangler v4 auto-provisioning)
-KV_ID=$(npx wrangler kv namespace list 2>/dev/null | jq -r '.[] | select(.title | endswith("DDNS_KV")) | .id' | head -n 1 || true)
+# Auto-discover KV Namespace ID (<worker-name>-kv)
+KV_ID=$(npx wrangler kv namespace list 2>/dev/null | jq -r '.[] | select(.title | ascii_downcase | endswith("-kv")) | .id' | head -n 1 || true)
 
 if [[ -n "$KV_ID" ]]; then
   TARGET_ARGS=(--namespace-id="$KV_ID" --remote)

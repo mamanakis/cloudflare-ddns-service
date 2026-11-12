@@ -1,7 +1,7 @@
 export interface Env {
   CF_API_TOKEN: string;
   CF_ZONE_ID?: string;
-  DDNS_KV: KVNamespace;
+  KV: KVNamespace;
   ONBOARD_PREFIX?: string; // Defaults to "onboard-ddns." (domain-agnostic)
   ONBOARD_HOST?: string;   // Optional exact hostname override
 }

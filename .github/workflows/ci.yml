@@ -60,7 +60,7 @@ jobs:
 
       - name: Ensure base Worker exists & auto-provision KV (First-run safety)
         run: |
-          # Wrangler v4 auto-provisions the DDNS_KV namespace on deploy if not yet created
+          # Wrangler v4 auto-provisions the <worker-name>-<kv binding name> cloudflare-ddns-service-kv namespace on deploy if not yet created
           npx wrangler deploy --keep-vars
           # Push the runtime DNS-edit token into the Worker's encrypted env.CF_API_TOKEN binding
           if [ -n "${{ secrets.CF_API_TOKEN }}" ]; then
@@ -83,12 +83,12 @@ jobs:
       - name: Discover Auto-Provisioned KV Namespace ID
         id: kv
         run: |
-          KV_ID=$(npx wrangler kv namespace list | jq -r '.[] | select(.title | endswith("DDNS_KV")) | .id' | head -n 1)
+          KV_ID=$(npx wrangler kv namespace list | jq -r '.[] | select(.title == "cloudflare-ddns-service-kv" or (.title | ascii_downcase | endswith("-kv"))) | .id' | head -n 1)
           if [ -z "$KV_ID" ]; then
-            echo "::error::Could not locate auto-provisioned DDNS_KV namespace"
+            echo "::error::Could not locate auto-provisioned KV namespace"
             exit 1
           fi
-          echo "id=$KV_ID" >> "$GITHUB_OUTPUT"
+          echo "id=$KV_ID" >> "$GITHUB_OUTPUT
 
       - name: Seed config.json into KV
         run: |

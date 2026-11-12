@@ -17,7 +17,7 @@ const HOSTNAME = "kb.mamanakis.com";
 
 describe("cloudflare-ddns-service workerd suite", () => {
   beforeEach(async () => {
-    await env.DDNS_KV.put(
+    await env.KV.put(
       "zone:map",
       JSON.stringify({ "mamanakis.com": ZONE_ID })
     );
@@ -37,7 +37,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
   });
 
   it("completes PIN onboarding, burns invite key, and creates isolated user:<id> record", async () => {
-    await env.DDNS_KV.put(
+    await env.KV.put(
       "invite:omada-router",
       JSON.stringify({ pin: "84920174" }),
       { expirationTtl: 3600 }
@@ -76,10 +76,10 @@ describe("cloudflare-ddns-service workerd suite", () => {
     expect(data.username).toBe("omada-router");
     expect(data.secret).toHaveLength(16);
 
-    const burnedInvite = await env.DDNS_KV.get("invite:omada-router");
+    const burnedInvite = await env.KV.get("invite:omada-router");
     expect(burnedInvite).toBeNull();
 
-    const storedUser = await env.DDNS_KV.get<UserRule>(
+    const storedUser = await env.KV.get<UserRule>(
       "user:omada-router",
       "json"
     );
@@ -93,7 +93,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
     const secret = "MyRouterToken123";
     const secret_hash = await sha256Hex(`${salt}${secret}`);
 
-    await env.DDNS_KV.put(
+    await env.KV.put(
       "user:omada",
       JSON.stringify({
         id: "omada",
@@ -147,7 +147,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
     const secret = "PassiveToken9999";
     const secret_hash = await sha256Hex(`${salt}${secret}`);
 
-    await env.DDNS_KV.put(
+    await env.KV.put(
       "user:pi-node",
       JSON.stringify({
         id: "pi-node",
