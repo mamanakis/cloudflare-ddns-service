@@ -66,10 +66,11 @@ jobs:
             jq --argjson zmap "$DDNS_ZONE_MAP" '.zone_map = $zmap' default-config.json > config.json
             jq --argjson zmap "$DDNS_ZONE_MAP" '
               ($zmap | keys_unsorted) as $d |
+              (.vars.ONBOARD_PREFIX // "onboard-ddns.") as $prefix |
               . + {
                 routes: (
                   ($d | map({ pattern: ("ddns." + .), custom_domain: true })) +
-                  ($d | map({ pattern: ((.vars.ONBOARD_PREFIX // "onboard-ddns.") + .), custom_domain: true }))
+                  ($d | map({ pattern: ($prefix + .), custom_domain: true }))
                 )
               }
             ' wrangler.jsonc > wrangler.deploy.jsonc
