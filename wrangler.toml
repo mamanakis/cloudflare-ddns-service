@@ -1,7 +1,0 @@
-name = "omada-cloudflare-ddns"
-main = "src/index.js"
-compatibility_date = "2024-01-01"
-
-[[kv_namespaces]]
-binding = "RATE_LIMIT_KV"
-id = "YOUR_KV_NAMESPACE_ID"

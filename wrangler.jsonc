@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-ddns-service",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "preview_urls": true,
+  "vars": {
+    "ONBOARD_PREFIX": "onboard-ddns."
+  },
+  "kv_namespaces": [
+    {
+      "binding": "DDNS_KV"
+    }
+  ]
+}

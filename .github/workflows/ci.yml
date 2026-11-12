@@ -1,0 +1,160 @@
+name: Online CI & Cloud Edge Smoke Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-build:
+    name: Typecheck, Workerd Suite & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run workerd integration tests
+        run: npm test
+
+      - name: Verify package build output
+        run: npm run build
+
+  edge-smoke-test:
+    name: Deploy Edge Preview & Live Curl Smoke Test
+    needs: unit-and-build
+    # Only run live Cloudflare API steps when secrets are available (push to main or internal PRs)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN_DEPLOY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure base Worker exists & auto-provision KV (First-run safety)
+        run: |
+          # Wrangler v4 auto-provisions the DDNS_KV namespace on deploy if not yet created
+          npx wrangler deploy --keep-vars
+          # Push the runtime DNS-edit token into the Worker's encrypted env.CF_API_TOKEN binding
+          if [ -n "${{ secrets.CF_API_TOKEN }}" ]; then
+            printf "%s" "${{ secrets.CF_API_TOKEN }}" | npx wrangler secret put CF_API_TOKEN
+          fi
+
+      - name: Upload Worker Preview Version & Extract Preview URL
+        id: preview
+        run: |
+          OUTPUT=$(npx wrangler versions upload --preview-alias "ci-${GITHUB_RUN_ID}")
+          echo "$OUTPUT"
+          PREVIEW_URL=$(echo "$OUTPUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | tail -n 1)
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::Failed to extract Preview URL from Wrangler output"
+            exit 1
+          fi
+          echo "url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+          echo "Uploaded live preview to: $PREVIEW_URL"
+
+      - name: Discover Auto-Provisioned KV Namespace ID
+        id: kv
+        run: |
+          KV_ID=$(npx wrangler kv namespace list | jq -r '.[] | select(.title | endswith("DDNS_KV")) | .id' | head -n 1)
+          if [ -z "$KV_ID" ]; then
+            echo "::error::Could not locate auto-provisioned DDNS_KV namespace"
+            exit 1
+          fi
+          echo "id=$KV_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Seed config.json into KV
+        run: |
+          chmod +x scripts/ddns-admin.sh
+          ./scripts/ddns-admin.sh seed-config config.json
+
+      - name: Run Live Edge Curl Assertions (Auth, Protocol & Onboarding)
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          KV_ID: ${{ steps.kv.outputs.id }}
+        run: |
+          set -euo pipefail
+          TEST_USER="ci-smoke-${GITHUB_RUN_ID}"
+          INVITE_KEY="invite:${TEST_USER}"
+          USER_KEY="user:${TEST_USER}"
+
+          cleanup() {
+            echo "Cleaning up ephemeral KV test keys..."
+            npx wrangler kv key delete "$INVITE_KEY" --namespace-id="$KV_ID" --remote || true
+            npx wrangler kv key delete "$USER_KEY" --namespace-id="$KV_ID" --remote || true
+          }
+          trap cleanup EXIT
+
+          echo "--- Test 1: Unauthenticated request returns 401 badauth ---"
+          HTTP_401=$(curl -s -o /tmp/res1.txt -w "%{http_code}" "${PREVIEW_URL}/nic/update?hostname=ci.example.com")
+          BODY_401=$(cat /tmp/res1.txt)
+          [ "$HTTP_401" = "401" ] && [ "$BODY_401" = "badauth" ] || {
+            echo "::error::Expected 401 badauth, got ${HTTP_401} (${BODY_401})"
+            exit 1
+          }
+
+          echo "--- Test 2: Invalid credentials return 403 badauth (Constant-Time Path) ---"
+          HTTP_403=$(curl -s -o /tmp/res2.txt -w "%{http_code}" -u "${TEST_USER}:wrongpass" "${PREVIEW_URL}/nic/update?hostname=ci.example.com")
+          BODY_403=$(cat /tmp/res2.txt)
+          [ "$HTTP_403" = "403" ] && [ "$BODY_403" = "badauth" ] || {
+            echo "::error::Expected 403 badauth, got ${HTTP_403} (${BODY_403})"
+            exit 1
+          }
+
+          echo "--- Test 3: Seed temporary user and verify unauthorized host returns 403 nohost ---"
+          # SHA-256 of "cisalt12" + "citoken123456789"
+          HASH=$(printf "cisalt12citoken123456789" | sha256sum | awk '{print $1}')
+          USER_JSON=$(jq -nc --arg id "$TEST_USER" --arg h "$HASH" '{
+            id: $id,
+            salt: "cisalt12",
+            secret_hash: $h,
+            allowed_exact: ["allowed.example.com"],
+            allowed_suffixes: []
+          }')
+          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="$KV_ID" --remote
+
+          # Wait briefly for KV edge propagation, then test unauthorized hostname
+          sleep 2
+          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=forbidden.example.com")
+          BODY_NOHOST=$(cat /tmp/res3.txt)
+          [ "$HTTP_NOHOST" = "403" ] && [ "$BODY_NOHOST" = "nohost" ] || {
+            echo "::error::Expected 403 nohost, got ${HTTP_NOHOST} (${BODY_NOHOST})"
+            exit 1
+          }
+
+          echo "--- Test 4: Verify RFC1918 / Bogon IP rejection returns 400 dnserr ---"
+          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=allowed.example.com&ip=192.168.1.50")
+          BODY_DNSERR=$(cat /tmp/res4.txt)
+          [ "$HTTP_DNSERR" = "400" ] && [ "$BODY_DNSERR" = "dnserr" ] || {
+            echo "::error::Expected 400 dnserr for RFC1918 IP, got ${HTTP_DNSERR} (${BODY_DNSERR})"
+            exit 1
+          }
+
+          echo "All live Cloudflare edge smoke assertions passed!"

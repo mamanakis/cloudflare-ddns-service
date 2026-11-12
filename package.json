@@ -1,0 +1,82 @@
+{
+  "name": "cloudflare-ddns-service",
+  "version": "1.0.0",
+  "description": "Multi-tenant, dual-stack (A/AAAA) DynDNS2 Cloudflare Worker service with KV onboarding and automatic stale record pruning.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./cf-dns": {
+      "types": "./dist/cf-dns.d.ts",
+      "import": "./dist/cf-dns.js"
+    },
+    "./security": {
+      "types": "./dist/security.d.ts",
+      "import": "./dist/security.js"
+    },
+    "./onboard": {
+      "types": "./dist/onboard.d.ts",
+      "import": "./dist/onboard.js"
+    }
+  },
+  "bin": {
+    "ddns-admin": "./scripts/ddns-admin.sh"
+  },
+  "files": [
+    "dist",
+    "scripts/ddns-admin.sh",
+    "config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "ddns",
+    "dyndns2",
+    "omada",
+    "mikrotik",
+    "ubiquiti",
+    "ipv6",
+    "dual-stack"
+  ],
+  "author": "Michael Todd Mamanakis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mamanakis/cloudflare-ddns-service.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.0",
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261110.1": true
+  }
+}
