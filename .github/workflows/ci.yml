@@ -189,6 +189,7 @@ jobs:
           }
 
           echo "--- Test 5: Verify Onboarding Portal accepts valid PIN, burns invite, and rejects reuse ---"
+          npx wrangler kv key delete "$USER_KEY" --namespace-id="$KV_ID" --remote || true
           npx wrangler kv key put "$INVITE_KEY" '{"pin":"99887766"}' --namespace-id="$KV_ID" --ttl=300 --remote
           sleep 2
 
