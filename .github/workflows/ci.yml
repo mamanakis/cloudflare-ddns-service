@@ -129,20 +129,18 @@ jobs:
           }
 
           echo "--- Test 3: Seed temporary user and verify unauthorized host returns 403 nohost ---"
-          # SHA-256 of "cisalt12" + "citoken123456789"
           HASH=$(printf "cisalt12citoken123456789" | sha256sum | awk '{print $1}')
           USER_JSON=$(jq -nc --arg id "$TEST_USER" --arg h "$HASH" '{
             id: $id,
             salt: "cisalt12",
             secret_hash: $h,
-            allowed_exact: ["allowed.example.com"],
+            allowed_exact: ["ci-allowed.mamanakis.net"],
             allowed_suffixes: []
           }')
-          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="$KV_ID" --remote
+          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="${{ steps.kv.outputs.id }}" --remote
 
-          # Wait briefly for KV edge propagation, then test unauthorized hostname
           sleep 2
-          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=forbidden.example.com")
+          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-forbidden.mamanakis.net")
           BODY_NOHOST=$(cat /tmp/res3.txt)
           [ "$HTTP_NOHOST" = "403" ] && [ "$BODY_NOHOST" = "nohost" ] || {
             echo "::error::Expected 403 nohost, got ${HTTP_NOHOST} (${BODY_NOHOST})"
@@ -150,7 +148,7 @@ jobs:
           }
 
           echo "--- Test 4: Verify RFC1918 / Bogon IP rejection returns 400 dnserr ---"
-          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=allowed.example.com&ip=192.168.1.50")
+          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-allowed.mamanakis.net&ip=192.168.1.50")
           BODY_DNSERR=$(cat /tmp/res4.txt)
           [ "$HTTP_DNSERR" = "400" ] && [ "$BODY_DNSERR" = "dnserr" ] || {
             echo "::error::Expected 400 dnserr for RFC1918 IP, got ${HTTP_DNSERR} (${BODY_DNSERR})"
