@@ -88,7 +88,7 @@ jobs:
             echo "::error::Could not locate auto-provisioned KV namespace"
             exit 1
           fi
-          echo "id=$KV_ID" >> "$GITHUB_OUTPUT
+          echo "id=$KV_ID" >> "$GITHUB_OUTPUT"
 
       - name: Seed config.json into KV
         run: |
