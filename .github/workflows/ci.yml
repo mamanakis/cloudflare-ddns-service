@@ -139,9 +139,30 @@ jobs:
           USER_KEY="user:${TEST_USER}"
 
           cleanup() {
-            echo "Cleaning up ephemeral KV test keys..."
-            npx wrangler kv key delete "$INVITE_KEY" --namespace-id="$KV_ID" --remote || true
-            npx wrangler kv key delete "$USER_KEY" --namespace-id="$KV_ID" --remote || true
+            echo "Cleaning up all ephemeral KV test keys (invites, users, audit logs, and runner rate-limits)..."
+            npx wrangler kv key delete "$INVITE_KEY" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+            npx wrangler kv key delete "$USER_KEY" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+
+            # Discover runner public IP (and any IP logged in CI audit entries) to clear ratelimit/blocked_ip keys
+            RUNNER_IP=$(curl -s --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]' || true)
+            if [ -n "$RUNNER_IP" ]; then
+              npx wrangler kv key delete "ratelimit:${RUNNER_IP}" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+              npx wrangler kv key delete "blocked_ip:${RUNNER_IP}" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+            fi
+
+            # Sweep audit:* keys created during this CI run and purge any associated IP rate-limit keys
+            AUDIT_KEYS=$(npx wrangler kv key list --prefix="audit:" --namespace-id="$KV_ID" --remote 2>/dev/null | jq -r '.[].name' || true)
+            for k in $AUDIT_KEYS; do
+              ENTRY=$(npx wrangler kv key get "$k" --namespace-id="$KV_ID" --remote 2>/dev/null || true)
+              if echo "$ENTRY" | jq -e --arg u "$TEST_USER" '.username == $u' >/dev/null 2>&1; then
+                LOGGED_IP=$(echo "$ENTRY" | jq -r '.ip // empty')
+                if [ -n "$LOGGED_IP" ] && [ "$LOGGED_IP" != "unknown" ]; then
+                  npx wrangler kv key delete "ratelimit:${LOGGED_IP}" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+                  npx wrangler kv key delete "blocked_ip:${LOGGED_IP}" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+                fi
+                npx wrangler kv key delete "$k" --namespace-id="$KV_ID" --remote >/dev/null 2>&1 || true
+              fi
+            done
           }
           trap cleanup EXIT
 
