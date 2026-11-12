@@ -189,17 +189,17 @@ jobs:
           }
 
           echo "--- Test 5: Verify Onboarding Portal stays dark (404), accepts valid PIN, and goes dark again ---"
-          HTTP_DARK1=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          HTTP_DARK1=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Onboard-Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
           [ "$HTTP_DARK1" = "404" ] || {
             echo "::error::Expected 404 dark onboarding portal when no invite exists, got ${HTTP_DARK1}"
             exit 1
           }
 
-          npx wrangler kv key put "$INVITE_KEY" '{"pin":"99887766"}' --namespace-id="${{ steps.kv.outputs.id }}" --ttl=300 --remote
+          npx wrangler kv key put "$INVITE_KEY" '{"pin":"99887766"}' --namespace-id="$KV_ID" --ttl=300 --remote
           sleep 2
 
           ONBOARD_RES=$(curl -s -w "\n%{http_code}" -X POST "${PREVIEW_URL}/onboard" \
-            -H "Host: onboard-ddns.${DOMAIN}" \
+            -H "X-Onboard-Host: onboard-ddns.${DOMAIN}" \
             -H "Content-Type: application/json" \
             -d "{\"username\":\"${TEST_USER}\",\"pin\":\"99887766\",\"mode\":\"token\"}")
           HTTP_ONBOARD=$(echo "$ONBOARD_RES" | tail -n1)
@@ -209,7 +209,7 @@ jobs:
             exit 1
           }
 
-          HTTP_DARK2=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          HTTP_DARK2=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Onboard-Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
           [ "$HTTP_DARK2" = "404" ] || {
             echo "::error::Expected onboarding portal to return to 404 after invite burned, got ${HTTP_DARK2}"
             exit 1

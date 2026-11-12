@@ -21,8 +21,8 @@ function textResponse(body: string, status: number): Response {
   });
 }
 
-function isOnboardRequest(url: URL, env: Env): boolean {
-  const host = url.hostname.toLowerCase();
+function isOnboardRequest(request: Request, url: URL, env: Env): boolean {
+  const host = (request.headers.get("X-Onboard-Host") || url.hostname).toLowerCase();
   if (env.ONBOARD_HOST && host === env.ONBOARD_HOST.toLowerCase()) {
     return true;
   }
@@ -108,7 +108,7 @@ export async function ddnsHandler(
   const url = new URL(request.url);
 
   // 1. Domain-Agnostic Onboarding Subdomain (matches onboard-ddns.*)
-  if (isOnboardRequest(url, env)) {
+  if (isOnboardRequest(request, url, env)) {
     if (!(await hasActiveInvite(env.KV))) {
       return new Response(null, { status: 404 });
     }
