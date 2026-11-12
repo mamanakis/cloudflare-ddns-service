@@ -34,7 +34,7 @@
   "files": [
     "dist",
     "scripts/ddns-admin.sh",
-    "config.json",
+    "default-config.json",
     "README.md",
     "LICENSE"
   ],

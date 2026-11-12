@@ -10,10 +10,13 @@ export function isHostAllowed(
 
   if (labels.some((label) => label.startsWith("_"))) return false;
 
-  // Enforce global BLOCK_LIST from config.json if present
-  if (serviceConfig?.BLOCK_LIST?.length) {
+  const blockList = serviceConfig?.block_list ?? [];
+  if (blockList.length > 0) {
     const subPrefix = labels[0];
-    if (serviceConfig.BLOCK_LIST.some((blocked) => subPrefix.includes(blocked.toLowerCase()))) {
+    if (blockList.some((blocked) => {
+      const b = blocked.toLowerCase();
+      return subPrefix === b || subPrefix.startsWith(`${b}-`) || subPrefix.endsWith(`-${b}`);
+    })) {
       return false;
     }
   }
@@ -61,8 +64,7 @@ export function isValidPublicIp(ip: string, expectedType: "A" | "AAAA"): boolean
       l === "::" ||
       l.startsWith("fe80:") ||
       l.startsWith("fc") ||
-      l.startsWith("fd") ||
-      l.startsWith("2001:db8:")
+      l.startsWith("fd")
     ) {
       return false;
     }
@@ -78,13 +80,20 @@ export async function reconcileDualStackRecords(
   hostname: string,
   ipv4: string | null,
   ipv6: string | null,
-  isAutoDetected: boolean
+  isAutoDetected: boolean,
+  serviceConfig?: ServiceConfig | null
 ): Promise<{ status: "good" | "nochg"; summary: string }> {
   const baseUrl = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`;
   const headers = {
     Authorization: `Bearer ${apiToken}`,
     "Content-Type": "application/json",
   };
+
+  const allowCreation = serviceConfig?.allow_creation ?? true;
+  const defaultTtl = serviceConfig?.default_ttl ?? 60;
+  const defaultProxied = serviceConfig?.default_proxied ?? false;
+  const allowIpv6AutoClear = serviceConfig?.allow_ipv6_auto_clear ?? true;
+  const maxZoneRecords = serviceConfig?.max_zone_records ?? 0;
 
   const lookupRes = await fetch(`${baseUrl}?name=${encodeURIComponent(hostname)}`, { headers });
   if (!lookupRes.ok) throw new Error(`Cloudflare API lookup HTTP ${lookupRes.status}`);
@@ -99,19 +108,39 @@ export async function reconcileDualStackRecords(
 
   async function syncRecord(ip: string | null, type: "A" | "AAAA", existing?: CloudflareDnsRecord) {
     if (ip) {
-      const payload = JSON.stringify({ type, name: hostname, content: ip, ttl: 120, proxied: false });
+      const payload = JSON.stringify({
+        type,
+        name: hostname,
+        content: ip,
+        ttl: defaultTtl,
+        proxied: defaultProxied,
+      });
       if (existing) {
-        if (existing.content !== ip || existing.proxied !== false) {
+        if (existing.content !== ip || existing.proxied !== defaultProxied) {
           const res = await fetch(`${baseUrl}/${existing.id}`, { method: "PUT", headers, body: payload });
           if (!res.ok) throw new Error(`Failed to update ${type} record`);
           changed = true;
         }
       } else {
+        if (!allowCreation) {
+          throw new Error(`Record creation disabled by allow_creation=false for ${hostname}`);
+        }
+        if (maxZoneRecords > 0) {
+          const countRes = await fetch(`${baseUrl}?per_page=1`, { headers });
+          if (countRes.ok) {
+            const countData: CloudflareListResponse = await countRes.json();
+            const total = countData.result_info?.total_count ?? 0;
+            if (total >= maxZoneRecords) {
+              throw new Error(`Zone record ceiling (${maxZoneRecords}) reached`);
+            }
+          }
+        }
         const res = await fetch(baseUrl, { method: "POST", headers, body: payload });
         if (!res.ok) throw new Error(`Failed to create ${type} record`);
         changed = true;
       }
     } else if (existing && !isAutoDetected) {
+      if (type === "AAAA" && !allowIpv6AutoClear) return;
       const res = await fetch(`${baseUrl}/${existing.id}`, { method: "DELETE", headers });
       if (!res.ok) throw new Error(`Failed to delete stale ${type} record`);
       changed = true;

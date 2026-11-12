@@ -6,7 +6,12 @@ export * from "./onboard";
 import { Env, ServiceConfig } from "./types";
 import { ONBOARD_HTML } from "./onboard-html";
 import { hasActiveInvite, handleOnboardSubmit } from "./onboard";
-import { extractCredentials, authenticateUserByKey } from "./security";
+import {
+  extractCredentials,
+  authenticateUserByKey,
+  isIpBlocked,
+  recordAuthFailure,
+} from "./security";
 import { isHostAllowed, isValidPublicIp, reconcileDualStackRecords } from "./cf-dns";
 
 function textResponse(body: string, status: number): Response {
@@ -27,19 +32,17 @@ function isOnboardRequest(url: URL, env: Env): boolean {
 
 async function resolveZoneAndConfig(
   hostname: string,
-  env: Env
+  env: Env,
+  preloadedConfig?: ServiceConfig | null
 ): Promise<{ zoneId: string | null; serviceConfig: ServiceConfig | null }> {
   const [zoneMap, serviceConfig] = await Promise.all([
     env.KV.get<Record<string, string>>("zone:map", "json"),
-    env.KV.get<ServiceConfig>("config:settings", "json"),
+    preloadedConfig !== undefined
+      ? Promise.resolve(preloadedConfig)
+      : env.KV.get<ServiceConfig>("config:settings", "json"),
   ]);
 
-  const combinedDomains: Record<string, string> = {
-    ...(serviceConfig?.ALLOW_LIST_DOMAINS || {}),
-    ...(zoneMap || {}),
-  };
-
-  for (const [domain, id] of Object.entries(combinedDomains)) {
+  for (const [domain, id] of Object.entries(zoneMap || {})) {
     const cleanDomain = domain.toLowerCase().replace(/^\./, "");
     if (hostname === cleanDomain || hostname.endsWith(`.${cleanDomain}`)) {
       return { zoneId: id, serviceConfig };
@@ -125,6 +128,11 @@ export async function ddnsHandler(
 
   // 2. DDNS Update Endpoint
   if (url.pathname === "/nic/update" || url.pathname === "/") {
+    const clientIp = (request.headers.get("CF-Connecting-IP") || "").trim();
+    if (clientIp && (await isIpBlocked(env.KV, clientIp))) {
+      return textResponse("badauth", 403);
+    }
+
     const creds = extractCredentials(request, url);
     if (!creds) {
       return new Response("badauth", {
@@ -133,14 +141,23 @@ export async function ddnsHandler(
       });
     }
 
-    const user = await authenticateUserByKey(creds, env.KV);
-    if (!user) return textResponse("badauth", 403);
+    const [user, serviceConfig] = await Promise.all([
+      authenticateUserByKey(creds, env.KV),
+      env.KV.get<ServiceConfig>("config:settings", "json"),
+    ]);
+
+    if (!user) {
+      if (clientIp) {
+        ctx.waitUntil(recordAuthFailure(env.KV, clientIp, `badauth:${creds.username}`, serviceConfig));
+      }
+      return textResponse("badauth", 403);
+    }
 
     const rawHost = url.searchParams.get("hostname");
     if (!rawHost) return textResponse("notfqdn", 400);
     const hostname = rawHost.trim().toLowerCase().replace(/\.$/, "");
 
-    const { zoneId, serviceConfig } = await resolveZoneAndConfig(hostname, env);
+    const { zoneId } = await resolveZoneAndConfig(hostname, env, serviceConfig);
     if (!zoneId || !isHostAllowed(hostname, user, serviceConfig)) {
       return textResponse("nohost", 403);
     }
@@ -157,7 +174,8 @@ export async function ddnsHandler(
         hostname,
         ipv4,
         ipv6,
-        isAutoDetected
+        isAutoDetected,
+        serviceConfig
       );
       return textResponse(result.summary, 200);
     } catch {

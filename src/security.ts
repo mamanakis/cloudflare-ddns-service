@@ -1,4 +1,4 @@
-import { UserRule } from "./types";
+import { UserRule, ServiceConfig, RateLimitState } from "./types";
 
 const DUMMY_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -118,4 +118,84 @@ export async function authenticateUserByKey(
   }
 
   return null;
+}
+
+export async function isIpBlocked(kv: KVNamespace, ip: string): Promise<boolean> {
+  if (!ip || ip === "unknown") return false;
+  const blocked = await kv.get(`blocked_ip:${ip}`);
+  return blocked !== null;
+}
+
+export async function sendAlertWebhook(
+  webhookUrl: string | undefined,
+  payload: Record<string, unknown>
+): Promise<void> {
+  if (!webhookUrl || webhookUrl.trim() === "") return;
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Non-blocking alert failure
+  }
+}
+
+export async function recordAuthFailure(
+  kv: KVNamespace,
+  ip: string,
+  reason: string,
+  config?: ServiceConfig | null
+): Promise<boolean> {
+  if (!ip || ip === "unknown") return false;
+  const maxFails = config?.rate_limit_max_fails ?? 3;
+  const windowSec = config?.rate_limit_window_sec ?? 300;
+  const baseBlockSec = config?.rate_limit_block_sec ?? 3600;
+  const penaltyType = config?.penalty_type ?? "logarithmic";
+  const maxPenaltySec = config?.max_penalty_sec ?? 3600000;
+
+  const stateKey = `ratelimit:${ip}`;
+  const now = Date.now();
+  const current = await kv.get<RateLimitState>(stateKey, "json");
+
+  let fails = 1;
+  let offenses = current?.offenses ?? 0;
+  let firstFailMs = now;
+
+  if (current && now - current.first_fail_ms <= windowSec * 1000) {
+    fails = current.fails + 1;
+    firstFailMs = current.first_fail_ms;
+  }
+
+  if (fails >= maxFails) {
+    offenses += 1;
+    const multiplier =
+      penaltyType === "logarithmic" ? Math.pow(2, Math.max(0, offenses - 1)) : 1;
+    const blockSec = Math.max(60, Math.min(maxPenaltySec, Math.floor(baseBlockSec * multiplier)));
+
+    await Promise.all([
+      kv.put(`blocked_ip:${ip}`, JSON.stringify({ reason, blocked_at: new Date(now).toISOString(), blockSec }), {
+        expirationTtl: blockSec,
+      }),
+      kv.put(stateKey, JSON.stringify({ fails: 0, offenses, first_fail_ms: now } satisfies RateLimitState), {
+        expirationTtl: Math.max(windowSec, blockSec * 2),
+      }),
+      sendAlertWebhook(config?.alert_webhook_url, {
+        event: "ip_rate_limited",
+        ip,
+        reason,
+        offenses,
+        block_seconds: blockSec,
+      }),
+    ]);
+    return true;
+  }
+
+  await kv.put(
+    stateKey,
+    JSON.stringify({ fails, offenses, first_fail_ms: firstFailMs } satisfies RateLimitState),
+    { expirationTtl: Math.max(60, windowSec * 2) }
+  );
+  return false;
 }

@@ -12,14 +12,14 @@ declare module "cloudflare:test" {
   interface ProvidedEnv extends Env {}
 }
 
-const ZONE_ID = "zone_mamanakis_com_111";
-const HOSTNAME = "kb.mamanakis.com";
+const ZONE_ID = "zone_example_com_111";
+const HOSTNAME = "kb.example.com";
 
 describe("cloudflare-ddns-service workerd suite", () => {
   beforeEach(async () => {
     await env.KV.put(
       "zone:map",
-      JSON.stringify({ "mamanakis.com": ZONE_ID })
+      JSON.stringify({ "example.com": ZONE_ID })
     );
   });
 
@@ -58,7 +58,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "CF-Connecting-IP": "136.36.45.10",
+          "CF-Connecting-IP": "203.0.113.10",
         },
         body: JSON.stringify({
           username: "omada-router",
@@ -114,7 +114,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
         return Response.json({
           success: true,
           result: [
-            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "136.36.1.1", proxied: false },
+            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "198.51.100.1", proxied: false },
             { id: "rec_aaaa_stale", type: "AAAA", name: HOSTNAME, content: "2605:a601:1234::1", proxied: false },
           ],
         });
@@ -129,7 +129,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
     });
 
     const req = new Request(
-      `https://ddns.mamanakis.net/?hostname=${HOSTNAME}&ip=136.36.2.99&ipv6=`,
+      `https://ddns.example.net/?hostname=${HOSTNAME}&ip=136.36.2.99&ipv6=`,
       { headers: { Authorization: `Basic ${btoa(`omada:${secret}`)}` } }
     );
     const ctx = createExecutionContext();
@@ -168,7 +168,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
         return Response.json({
           success: true,
           result: [
-            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "136.36.1.1", proxied: false },
+            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "198.51.100.1", proxied: false },
             { id: "rec_aaaa_keep", type: "AAAA", name: HOSTNAME, content: "2605:a601:9999::5", proxied: false },
           ],
         });
@@ -179,7 +179,7 @@ describe("cloudflare-ddns-service workerd suite", () => {
       throw new Error(`Unexpected fetch (e.g. unwanted DELETE): ${method} ${url}`);
     });
 
-    const req = new Request(`https://ddns.mamanakis.net/?hostname=${HOSTNAME}`, {
+    const req = new Request(`https://ddns.example.net/?hostname=${HOSTNAME}`, {
       headers: {
         Authorization: `Bearer pi-node:${secret}`,
         "CF-Connecting-IP": "136.36.9.250",

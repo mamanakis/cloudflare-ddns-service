@@ -150,3 +150,10 @@ vite.config.ts.timestamp-*
 
 # Cloudflare Worker directories
 .wrangler/
+.dev.vars
+
+# Users config file
+config.json
+
+# wrangler deploy file with injected domains from repo env vars
+wrangler.deploy.jsonc

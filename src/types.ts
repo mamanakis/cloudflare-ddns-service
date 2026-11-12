@@ -7,16 +7,26 @@ export interface Env {
 }
 
 export interface ServiceConfig {
-  ALLOWED_TRIES?: number;
-  PENALTY_TYPE?: "logarithmic" | "linear" | "flat";
-  BASE_PENALTY_SECONDS?: number;
-  MAX_PENALTY_SECONDS?: number;
-  ALLOW_CREATION?: boolean;
-  ALLOW_LIST_DOMAINS?: Record<string, string>;
-  ALLOW_LIST_PREFIXES?: string[];
-  BLOCK_LIST?: string[];
-  MAX_ZONE_RECORDS?: number;
-  ALERT_WEBHOOK_URL?: string;
+  block_list?: string[];
+  allow_creation?: boolean;
+  default_ttl?: number;
+  default_proxied?: boolean;
+  allow_ipv6_auto_clear?: boolean;
+  rate_limit_max_fails?: number;
+  rate_limit_window_sec?: number;
+  rate_limit_block_sec?: number;
+  penalty_type?: "logarithmic" | "fixed";
+  max_penalty_sec?: number;
+  max_zone_records?: number;
+  max_pin_attempts?: number;
+  audit_ttl_days?: number;
+  alert_webhook_url?: string;
+}
+
+export interface RateLimitState {
+  fails: number;
+  offenses: number;
+  first_fail_ms: number;
 }
 
 export interface UserRule {
@@ -47,9 +57,13 @@ export interface CloudflareDnsRecord {
   name: string;
   content: string;
   proxied: boolean;
+  ttl?: number;
 }
 
 export interface CloudflareListResponse {
   success: boolean;
   result: CloudflareDnsRecord[];
+  result_info?: {
+    total_count?: number;
+  };
 }

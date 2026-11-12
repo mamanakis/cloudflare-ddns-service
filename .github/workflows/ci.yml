@@ -58,13 +58,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Ensure base Worker exists & auto-provision KV (First-run safety)
+      - name: Build deployment Wrangler config & config.json from DDNS_ZONE_MAP
+        env:
+          DDNS_ZONE_MAP: ${{ vars.DDNS_ZONE_MAP }}
         run: |
-          # Wrangler v4 auto-provisions the <worker-name>-<kv binding name> cloudflare-ddns-service-kv namespace on deploy if not yet created
-          npx wrangler deploy --keep-vars
-          # Push the runtime DNS-edit token into the Worker's encrypted env.CF_API_TOKEN binding
+          if [ -n "$DDNS_ZONE_MAP" ]; then
+            jq --argjson zmap "$DDNS_ZONE_MAP" '.zone_map = $zmap' default-config.json > config.json
+            jq --argjson zmap "$DDNS_ZONE_MAP" '
+              ($zmap | keys_unsorted) as $d |
+              . + {
+                routes: (
+                  ($d | map({ pattern: ("ddns." + .), custom_domain: true })) +
+                  ($d | map({ pattern: ((.vars.ONBOARD_PREFIX // "onboard-ddns.") + .), custom_domain: true }))
+                )
+              }
+            ' wrangler.jsonc > wrangler.deploy.jsonc
+          else
+            cp default-config.json config.json
+            cp wrangler.jsonc wrangler.deploy.jsonc
+          fi
+
+      - name: Ensure base Worker exists, auto-provision KV & sync runtime secret
+        run: |
+          npx wrangler deploy --config wrangler.deploy.jsonc --keep-vars
           if [ -n "${{ secrets.CF_API_TOKEN }}" ]; then
-            printf "%s" "${{ secrets.CF_API_TOKEN }}" | npx wrangler secret put CF_API_TOKEN
+            printf "%s" "${{ secrets.CF_API_TOKEN }}" | npx wrangler secret put CF_API_TOKEN --config wrangler.deploy.jsonc
           fi
 
       - name: Upload Worker Preview Version & Extract Preview URL
@@ -90,8 +108,20 @@ jobs:
           fi
           echo "id=$KV_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Seed config.json into KV
+      - name: Seed config into KV
+        env:
+          DDNS_ZONE_MAP: ${{ vars.DDNS_ZONE_MAP }}
         run: |
+          if [ ! -f config.json ]; then
+            if [ -n "$DDNS_ZONE_MAP" ]; then
+              jq --argjson zmap "$DDNS_ZONE_MAP" '
+                .zone_map = $zmap |
+                .allowed_domains = ($zmap | keys)
+              ' default-config.json > config.json
+            else
+              cp default-config.json config.json
+            fi
+          fi
           chmod +x scripts/ddns-admin.sh
           ./scripts/ddns-admin.sh seed-config config.json
 
@@ -100,6 +130,8 @@ jobs:
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
           KV_ID: ${{ steps.kv.outputs.id }}
         run: |
+          DOMAIN=$(jq -r '.zone_map | keys_unsorted[0] // "example.com"' config.json)
+          DOMAIN="${DOMAIN:-example.com}"
           set -euo pipefail
           TEST_USER="ci-smoke-${GITHUB_RUN_ID}"
           INVITE_KEY="invite:${TEST_USER}"
@@ -113,7 +145,7 @@ jobs:
           trap cleanup EXIT
 
           echo "--- Test 1: Unauthenticated request returns 401 badauth ---"
-          HTTP_401=$(curl -s -o /tmp/res1.txt -w "%{http_code}" "${PREVIEW_URL}/nic/update?hostname=ci.example.com")
+          HTTP_401=$(curl -s -o /tmp/res1.txt -w "%{http_code}" "${PREVIEW_URL}/nic/update?hostname=ci.${DOMAIN}")
           BODY_401=$(cat /tmp/res1.txt)
           [ "$HTTP_401" = "401" ] && [ "$BODY_401" = "badauth" ] || {
             echo "::error::Expected 401 badauth, got ${HTTP_401} (${BODY_401})"
@@ -121,7 +153,7 @@ jobs:
           }
 
           echo "--- Test 2: Invalid credentials return 403 badauth (Constant-Time Path) ---"
-          HTTP_403=$(curl -s -o /tmp/res2.txt -w "%{http_code}" -u "${TEST_USER}:wrongpass" "${PREVIEW_URL}/nic/update?hostname=ci.example.com")
+          HTTP_403=$(curl -s -o /tmp/res2.txt -w "%{http_code}" -u "${TEST_USER}:wrongpass" "${PREVIEW_URL}/nic/update?hostname=ci.${DOMAIN}")
           BODY_403=$(cat /tmp/res2.txt)
           [ "$HTTP_403" = "403" ] && [ "$BODY_403" = "badauth" ] || {
             echo "::error::Expected 403 badauth, got ${HTTP_403} (${BODY_403})"
@@ -134,13 +166,13 @@ jobs:
             id: $id,
             salt: "cisalt12",
             secret_hash: $h,
-            allowed_exact: ["ci-allowed.mamanakis.net"],
+            allowed_exact: ["ci-allowed.${DOMAIN}"],
             allowed_suffixes: []
           }')
           npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="${{ steps.kv.outputs.id }}" --remote
 
           sleep 2
-          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-forbidden.mamanakis.net")
+          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-forbidden.${DOMAIN}")
           BODY_NOHOST=$(cat /tmp/res3.txt)
           [ "$HTTP_NOHOST" = "403" ] && [ "$BODY_NOHOST" = "nohost" ] || {
             echo "::error::Expected 403 nohost, got ${HTTP_NOHOST} (${BODY_NOHOST})"
@@ -148,10 +180,37 @@ jobs:
           }
 
           echo "--- Test 4: Verify RFC1918 / Bogon IP rejection returns 400 dnserr ---"
-          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-allowed.mamanakis.net&ip=192.168.1.50")
+          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-allowed.${DOMAIN}&ip=192.168.1.50")
           BODY_DNSERR=$(cat /tmp/res4.txt)
           [ "$HTTP_DNSERR" = "400" ] && [ "$BODY_DNSERR" = "dnserr" ] || {
             echo "::error::Expected 400 dnserr for RFC1918 IP, got ${HTTP_DNSERR} (${BODY_DNSERR})"
+            exit 1
+          }
+
+          echo "--- Test 5: Verify Onboarding Portal stays dark (404), accepts valid PIN, and goes dark again ---"
+          HTTP_DARK1=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          [ "$HTTP_DARK1" = "404" ] || {
+            echo "::error::Expected 404 dark onboarding portal when no invite exists, got ${HTTP_DARK1}"
+            exit 1
+          }
+
+          npx wrangler kv key put "$INVITE_KEY" '{"pin":"99887766"}' --namespace-id="${{ steps.kv.outputs.id }}" --ttl=300 --remote
+          sleep 2
+
+          ONBOARD_RES=$(curl -s -w "\n%{http_code}" -X POST "${PREVIEW_URL}/onboard" \
+            -H "Host: onboard-ddns.${DOMAIN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${TEST_USER}\",\"pin\":\"99887766\",\"mode\":\"token\"}")
+          HTTP_ONBOARD=$(echo "$ONBOARD_RES" | tail -n1)
+          ONBOARD_BODY=$(echo "$ONBOARD_RES" | sed '$d')
+          [ "$HTTP_ONBOARD" = "200" ] && echo "$ONBOARD_BODY" | jq -e '.secret | length == 16' >/dev/null || {
+            echo "::error::Expected 200 and 16-char secret from /onboard, got ${HTTP_ONBOARD} (${ONBOARD_BODY})"
+            exit 1
+          }
+
+          HTTP_DARK2=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          [ "$HTTP_DARK2" = "404" ] || {
+            echo "::error::Expected onboarding portal to return to 404 after invite burned, got ${HTTP_DARK2}"
             exit 1
           }
 

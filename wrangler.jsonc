@@ -3,7 +3,7 @@
   "name": "cloudflare-ddns-service",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-08",
-  "workers_dev": true,
+  "workers_dev": false,
   "preview_urls": true,
   "vars": {
     "ONBOARD_PREFIX": "onboard-ddns."

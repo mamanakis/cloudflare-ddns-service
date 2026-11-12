@@ -1,0 +1,53 @@
+{
+  "_comment_overview": "Default configuration template for cloudflare-ddns-service. Copy to config.json for local use or let CI populate from the DDNS_ZONE_MAP repository variable.",
+
+  "_comment_zone_map": "Maps each permitted root domain (no leading dot) to its 32-character Cloudflare Zone ID. The keys of this object also serve as the allowed domains whitelist, and the first key is used as the primary domain in CI smoke tests.",
+  "zone_map": {
+    "example.com": "00000000000000000000000000000001",
+    "example.net": "00000000000000000000000000000002",
+    "example.org": "00000000000000000000000000000003"
+  },
+
+  "_comment_block_list": "Array of forbidden leftmost hostname labels (subdomains) that can never be created or updated via DDNS, even if a user has a wildcard suffix rule.",
+  "block_list": [
+    "admin",
+    "root",
+    "test",
+    "hack",
+    "onboard-ddns",
+    "ddns"
+  ],
+
+  "_comment_allow_creation": "If true, creates a new A/AAAA DNS record when an authorized hostname does not yet exist in the Cloudflare zone. If false, only updates existing records.",
+  "allow_creation": true,
+
+  "_comment_default_ttl": "DNS Time-To-Live in seconds for created/updated A and AAAA records (60 is Cloudflare's minimum non-proxied TTL; 1 = Automatic).",
+  "default_ttl": 60,
+
+  "_comment_default_proxied": "Whether newly created or updated DDNS records have Cloudflare proxy (orange cloud) enabled by default. Should almost always be false for router/VPN DDNS.",
+  "default_proxied": false,
+
+  "_comment_allow_ipv6_auto_clear": "When true, if a client explicitly sends an IPv4 update with an empty ipv6= parameter (e.g. ipv6=), any stale AAAA record on that hostname is automatically deleted.",
+  "allow_ipv6_auto_clear": true,
+
+  "_comment_rate_limit_max_fails": "Maximum failed authentication or PIN onboarding attempts allowed from a single client IP before temporary blocking kicks in.",
+  "rate_limit_max_fails": 3,
+
+  "_comment_rate_limit_window_sec": "Sliding time window (in seconds) during which failed attempts are counted before resetting.",
+  "rate_limit_window_sec": 300,
+
+  "_comment_rate_limit_block_sec": "Base duration (in seconds) that a client IP is blocked in KV after exceeding rate_limit_max_fails (3600 = 1 hour).",
+  "rate_limit_block_sec": 3600,
+
+  "_comment_penalty_type": "Backoff strategy for repeated lockouts: 'fixed' (always rate_limit_block_sec) or 'logarithmic' (scales up toward max_penalty_sec on repeat offenses).",
+  "penalty_type": "logarithmic",
+
+  "_comment_max_penalty_sec": "Maximum lockout cap (in seconds) when penalty_type is set to 'logarithmic' (3600000 = ~41.6 days).",
+  "max_penalty_sec": 3600000,
+
+  "_comment_max_zone_records": "Safety ceiling on total DNS records in a zone before refusing automatic record creation (prevents runaway wildcard abuse).",
+  "max_zone_records": 150,
+
+  "_comment_alert_webhook_url": "Optional HTTPS webhook URL (Discord/Slack/ntfy) to POST security alerts when an IP is locked out or onboarding occurs. Leave empty string to disable.",
+  "alert_webhook_url": ""
+}

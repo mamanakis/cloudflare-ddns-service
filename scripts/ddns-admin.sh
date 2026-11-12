@@ -19,8 +19,8 @@ Usage: $(basename "$0") <command> [arguments]
 Commands:
   seed-config [config.json]             Load config.json into KV (config:settings & zone:map)
   invite <username> [ttl_hours]         Generate an 8-digit PIN invite (default: 24h)
-  allow-exact <username> <fqdn>         Authorize an exact hostname (e.g., kb.mamanakis.com)
-  allow-suffix <username> <suffix>      Authorize a domain suffix (e.g., .vpn.mamanakis.com)
+  allow-exact <username> <fqdn>         Authorize an exact hostname (e.g., kb.example.com)
+  allow-suffix <username> <suffix>      Authorize a domain suffix (e.g., .vpn.example.net)
   revoke-host <username> <host_or_suf>  Remove a hostname or suffix from a user
   show-user <username>                  Display a user's current KV record
   list-users                            List all registered users
@@ -37,18 +37,18 @@ shift
 case "$CMD" in
   seed-config)
     FILE="${1:-config.json}"
-    [[ ! -f "$FILE" ]] && { echo "Error: '${FILE}' not found."; exit 1; }
+    [[ -f "$FILE" ]] || { echo "Error: Config file '$FILE' not found." >&2; exit 1; }
+    # Strip _comment_* keys and zone_map object before writing config:settings
+    SETTINGS_JSON=$(jq -c 'with_entries(select(.key | startswith("_comment") | not)) | del(.zone_map)' "$FILE")
+    npx wrangler kv key put "config:settings" "$SETTINGS_JSON" "${TARGET_ARGS[@]}"
+    echo "Seeded config:settings from $FILE"
 
-    # 1. Upload full config.json to config:settings
-    npx wrangler kv key put "config:settings" --path="$FILE" "${TARGET_ARGS[@]}" > /dev/null
-    echo "Uploaded ${FILE} -> config:settings"
-
-    # 2. Extract ALLOW_LIST_DOMAINS (stripping leading dots) and upload to zone:map
-    ZONE_MAP=$(jq -c '
-      (.ALLOW_LIST_DOMAINS // {}) | with_entries(.key |= ltrimstr("."))
-    ' "$FILE")
-    npx wrangler kv key put "zone:map" "$ZONE_MAP" "${TARGET_ARGS[@]}" > /dev/null
-    echo "Synced ALLOW_LIST_DOMAINS -> zone:map: ${ZONE_MAP}"
+    # If zone_map is defined in the config file, seed zone:map automatically
+    if jq -e '.zone_map and (.zone_map | type == "object")' "$FILE" >/dev/null 2>&1; then
+      ZONE_MAP_JSON=$(jq -c '.zone_map' "$FILE")
+      npx wrangler kv key put "zone:map" "$ZONE_MAP_JSON" "${TARGET_ARGS[@]}"
+      echo "Seeded zone:map from $FILE"
+    fi
     ;;
 
   invite)

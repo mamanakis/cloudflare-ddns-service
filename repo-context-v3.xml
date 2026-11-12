@@ -1,0 +1,1887 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.github/
+  workflows/
+    ci.yml
+    publish-npm.yml
+scripts/
+  ddns-admin.sh
+src/
+  cf-dns.ts
+  index.ts
+  onboard-html.ts
+  onboard.ts
+  security.ts
+  types.ts
+test/
+  ddns.spec.ts
+  tsconfig.json
+.gitignore
+default-config.json
+LICENSE
+package.json
+README.md
+tsconfig.json
+vitest.config.ts
+wrangler.jsonc
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="default-config.json">
+{
+  "_comment_overview": "Default configuration template for cloudflare-ddns-service. Copy to config.json for local use or let CI populate from the DDNS_ZONE_MAP repository variable.",
+
+  "_comment_zone_map": "Maps each permitted root domain (no leading dot) to its 32-character Cloudflare Zone ID. The keys of this object also serve as the allowed domains whitelist, and the first key is used as the primary domain in CI smoke tests.",
+  "zone_map": {
+    "example.com": "00000000000000000000000000000001",
+    "example.net": "00000000000000000000000000000002",
+    "example.org": "00000000000000000000000000000003"
+  },
+
+  "_comment_block_list": "Array of forbidden leftmost hostname labels (subdomains) that can never be created or updated via DDNS, even if a user has a wildcard suffix rule.",
+  "block_list": [
+    "admin",
+    "root",
+    "test",
+    "hack",
+    "onboard-ddns",
+    "ddns"
+  ],
+
+  "_comment_allow_creation": "If true, creates a new A/AAAA DNS record when an authorized hostname does not yet exist in the Cloudflare zone. If false, only updates existing records.",
+  "allow_creation": true,
+
+  "_comment_default_ttl": "DNS Time-To-Live in seconds for created/updated A and AAAA records (60 is Cloudflare's minimum non-proxied TTL; 1 = Automatic).",
+  "default_ttl": 60,
+
+  "_comment_default_proxied": "Whether newly created or updated DDNS records have Cloudflare proxy (orange cloud) enabled by default. Should almost always be false for router/VPN DDNS.",
+  "default_proxied": false,
+
+  "_comment_allow_ipv6_auto_clear": "When true, if a client explicitly sends an IPv4 update with an empty ipv6= parameter (e.g. ipv6=), any stale AAAA record on that hostname is automatically deleted.",
+  "allow_ipv6_auto_clear": true,
+
+  "_comment_rate_limit_max_fails": "Maximum failed authentication or PIN onboarding attempts allowed from a single client IP before temporary blocking kicks in.",
+  "rate_limit_max_fails": 3,
+
+  "_comment_rate_limit_window_sec": "Sliding time window (in seconds) during which failed attempts are counted before resetting.",
+  "rate_limit_window_sec": 300,
+
+  "_comment_rate_limit_block_sec": "Base duration (in seconds) that a client IP is blocked in KV after exceeding rate_limit_max_fails (3600 = 1 hour).",
+  "rate_limit_block_sec": 3600,
+
+  "_comment_penalty_type": "Backoff strategy for repeated lockouts: 'fixed' (always rate_limit_block_sec) or 'logarithmic' (scales up toward max_penalty_sec on repeat offenses).",
+  "penalty_type": "logarithmic",
+
+  "_comment_max_penalty_sec": "Maximum lockout cap (in seconds) when penalty_type is set to 'logarithmic' (3600000 = ~41.6 days).",
+  "max_penalty_sec": 3600000,
+
+  "_comment_max_zone_records": "Safety ceiling on total DNS records in a zone before refusing automatic record creation (prevents runaway wildcard abuse).",
+  "max_zone_records": 150,
+
+  "_comment_alert_webhook_url": "Optional HTTPS webhook URL (Discord/Slack/ntfy) to POST security alerts when an IP is locked out or onboarding occurs. Leave empty string to disable.",
+  "alert_webhook_url": ""
+}
+</file>
+
+<file path=".github/workflows/publish-npm.yml">
+name: Publish to NPM
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Typecheck, Test, Build & Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Verify Git tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Git tag (v${TAG_VERSION}) does not match package.json version (${PKG_VERSION})"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run workerd unit & integration tests
+        run: npm test
+
+      - name: Build distribution files
+        run: npm run build
+
+      - name: Ensure CLI script is executable
+        run: chmod +x scripts/ddns-admin.sh
+
+      - name: Publish to NPM with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+</file>
+
+<file path="src/cf-dns.ts">
+import { UserRule, ServiceConfig, CloudflareDnsRecord, CloudflareListResponse } from "./types";
+
+export function isHostAllowed(
+  hostname: string,
+  user: UserRule,
+  serviceConfig?: ServiceConfig | null
+): boolean {
+  const target = hostname.toLowerCase();
+  const labels = target.split(".");
+
+  if (labels.some((label) => label.startsWith("_"))) return false;
+
+  // Enforce global BLOCK_LIST from config.json if present
+  if (serviceConfig?.BLOCK_LIST?.length) {
+    const subPrefix = labels[0];
+    if (serviceConfig.BLOCK_LIST.some((blocked) => subPrefix.includes(blocked.toLowerCase()))) {
+      return false;
+    }
+  }
+
+  if (user.allowed_exact.some((exact) => target === exact.toLowerCase())) {
+    return true;
+  }
+
+  return user.allowed_suffixes.some((suffix) => {
+    const norm = suffix.toLowerCase();
+    const bounded = norm.startsWith(".") ? norm : `.${norm}`;
+    return target.endsWith(bounded) && target.length > bounded.length;
+  });
+}
+
+export function isValidPublicIp(ip: string, expectedType: "A" | "AAAA"): boolean {
+  if (expectedType === "A") {
+    const ipv4Regex =
+      /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+    if (!ipv4Regex.test(ip)) return false;
+    const p = ip.split(".").map(Number);
+    if (
+      p[0] === 10 ||
+      p[0] === 127 ||
+      p[0] === 0 ||
+      (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+      (p[0] === 192 && p[1] === 168) ||
+      (p[0] === 169 && p[1] === 254) ||
+      (p[0] === 100 && p[1] >= 64 && p[1] <= 127)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  if (expectedType === "AAAA") {
+    try {
+      new URL(`http://[${ip}]`);
+    } catch {
+      return false;
+    }
+    const l = ip.toLowerCase();
+    if (
+      l === "::1" ||
+      l === "::" ||
+      l.startsWith("fe80:") ||
+      l.startsWith("fc") ||
+      l.startsWith("fd") ||
+      l.startsWith("2001:db8:")
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+export async function reconcileDualStackRecords(
+  zoneId: string,
+  apiToken: string,
+  hostname: string,
+  ipv4: string | null,
+  ipv6: string | null,
+  isAutoDetected: boolean
+): Promise<{ status: "good" | "nochg"; summary: string }> {
+  const baseUrl = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`;
+  const headers = {
+    Authorization: `Bearer ${apiToken}`,
+    "Content-Type": "application/json",
+  };
+
+  const lookupRes = await fetch(`${baseUrl}?name=${encodeURIComponent(hostname)}`, { headers });
+  if (!lookupRes.ok) throw new Error(`Cloudflare API lookup HTTP ${lookupRes.status}`);
+
+  const lookupData: CloudflareListResponse = await lookupRes.json();
+  if (!lookupData.success) throw new Error("Cloudflare API returned success: false");
+
+  const recordA = lookupData.result.find((r) => r.type === "A");
+  const recordAAAA = lookupData.result.find((r) => r.type === "AAAA");
+
+  let changed = false;
+
+  async function syncRecord(ip: string | null, type: "A" | "AAAA", existing?: CloudflareDnsRecord) {
+    if (ip) {
+      const payload = JSON.stringify({ type, name: hostname, content: ip, ttl: 120, proxied: false });
+      if (existing) {
+        if (existing.content !== ip || existing.proxied !== false) {
+          const res = await fetch(`${baseUrl}/${existing.id}`, { method: "PUT", headers, body: payload });
+          if (!res.ok) throw new Error(`Failed to update ${type} record`);
+          changed = true;
+        }
+      } else {
+        const res = await fetch(baseUrl, { method: "POST", headers, body: payload });
+        if (!res.ok) throw new Error(`Failed to create ${type} record`);
+        changed = true;
+      }
+    } else if (existing && !isAutoDetected) {
+      const res = await fetch(`${baseUrl}/${existing.id}`, { method: "DELETE", headers });
+      if (!res.ok) throw new Error(`Failed to delete stale ${type} record`);
+      changed = true;
+    }
+  }
+
+  await Promise.all([
+    syncRecord(ipv4, "A", recordA),
+    syncRecord(ipv6, "AAAA", recordAAAA),
+  ]);
+
+  const activeIps = [ipv4, ipv6].filter(Boolean).join(" ");
+  return {
+    status: changed ? "good" : "nochg",
+    summary: `${changed ? "good" : "nochg"} ${activeIps}`.trim(),
+  };
+}
+</file>
+
+<file path="src/onboard-html.ts">
+export const ONBOARD_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DDNS Account Setup</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2.5rem auto; padding: 0 1rem; line-height: 1.5; }
+    .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 1.5rem; }
+    label { display: block; font-weight: 600; margin-top: 0.85rem; }
+    input, select { width: 100%; padding: 0.55rem; margin-top: 0.25rem; box-sizing: border-box; font-size: 1rem; }
+    button { margin-top: 1.1rem; padding: 0.65rem 1.1rem; font-size: 1rem; font-weight: 600; cursor: pointer; width: 100%; }
+    .err { color: #b91c1c; margin-top: 0.75rem; font-weight: 600; }
+    .warn { background: #fef3c7; border: 1px solid #f59e0b; padding: 0.75rem; border-radius: 6px; color: #92400e; font-size: 0.9rem; }
+    .secret-box { font-family: monospace; font-size: 1.1rem; background: #f3f4f6; padding: 0.75rem; border-radius: 6px; text-align: center; letter-spacing: 0.05em; user-select: none; }
+  </style>
+</head>
+<body>
+  <h2>DDNS Credential Registration</h2>
+  <div class="card" id="formCard">
+    <label for="username">Username</label>
+    <input id="username" autocomplete="off" />
+
+    <label for="pin">8-Digit Invite PIN</label>
+    <input id="pin" inputmode="numeric" maxlength="8" autocomplete="one-time-code" />
+
+    <label for="mode">Credential Type</label>
+    <select id="mode" onchange="toggleMode()">
+      <option value="token">Generate 16-Char Router Token (Recommended)</option>
+      <option value="password">Choose My Own Password</option>
+    </select>
+
+    <div id="pwGroup" style="display:none;">
+      <label for="password">Password (12+ chars, upper, lower, number; no : or @)</label>
+      <input id="password" type="password" autocomplete="new-password" />
+    </div>
+
+    <button type="button" onclick="submitForm()">Activate Credentials</button>
+    <div class="err" id="errMsg"></div>
+  </div>
+
+  <div class="card" id="doneCard" style="display:none;">
+    <div class="warn"><strong>Copy this secret right now.</strong> It has been hashed and cannot be viewed again.</div>
+    <p><strong>Username:</strong> <span id="resUser"></span></p>
+    <div class="secret-box" id="resSecret"></div>
+    <button type="button" onclick="copySecret()" id="copyBtn">Copy Secret to Clipboard</button>
+    <p style="font-size:0.9rem; color:#4b5563; margin-top:1rem;">Your account is active with an empty domain list. Let the admin know you registered so they can enable your subdomain(s).</p>
+  </div>
+
+  <script>
+    let savedSecret = "";
+    function toggleMode() {
+      const isPw = document.getElementById("mode").value === "password";
+      document.getElementById("pwGroup").style.display = isPw ? "block" : "none";
+    }
+    async function submitForm() {
+      const errEl = document.getElementById("errMsg");
+      errEl.textContent = "";
+      const payload = {
+        username: document.getElementById("username").value,
+        pin: document.getElementById("pin").value,
+        mode: document.getElementById("mode").value,
+        password: document.getElementById("password").value
+      };
+      const res = await fetch("/onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || "Registration failed.";
+        return;
+      }
+      savedSecret = data.secret;
+      document.getElementById("resUser").textContent = data.username;
+      document.getElementById("resSecret").textContent = savedSecret;
+      document.getElementById("formCard").style.display = "none";
+      document.getElementById("doneCard").style.display = "block";
+    }
+    async function copySecret() {
+      await navigator.clipboard.writeText(savedSecret);
+      document.getElementById("copyBtn").textContent = "Copied!";
+    }
+  </script>
+</body>
+</html>`;
+</file>
+
+<file path="src/security.ts">
+import { UserRule } from "./types";
+
+const DUMMY_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+export async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function timingSafeEqualString(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(bufA, bufB);
+}
+
+export function generateAlphanumeric(len: number): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const maxValidByte = 248;
+  let result = "";
+  const buf = new Uint8Array(len * 2);
+
+  while (result.length < len) {
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && result.length < len; i++) {
+      if (buf[i] < maxValidByte) {
+        result += chars[buf[i] % chars.length];
+      }
+    }
+  }
+  return result;
+}
+
+export function generateHex(byteLen: number): string {
+  const bytes = new Uint8Array(byteLen);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export function validatePasswordComplexity(pw: string): string | null {
+  if (pw.length < 12 || pw.length > 64) {
+    return "Password must be between 12 and 64 characters.";
+  }
+  if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) {
+    return "Password must include uppercase, lowercase, and at least one number.";
+  }
+  if (/[:@\s]/.test(pw)) {
+    return "Password cannot contain spaces, colons (:), or @ symbols (they break legacy routers).";
+  }
+  return null;
+}
+
+export function extractCredentials(
+  request: Request,
+  url: URL
+): { username: string; secret: string } | null {
+  const authHeader = request.headers.get("Authorization") || "";
+
+  if (authHeader.startsWith("Basic ")) {
+    try {
+      const decoded = atob(authHeader.slice(6).trim());
+      const colonIdx = decoded.indexOf(":");
+      if (colonIdx === -1) return null;
+      return {
+        username: decoded.slice(0, colonIdx).trim().toLowerCase(),
+        secret: decoded.slice(colonIdx + 1),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  if (authHeader.startsWith("Bearer ")) {
+    const rawToken = authHeader.slice(7).trim();
+    const colonIdx = rawToken.indexOf(":");
+    if (colonIdx !== -1) {
+      return {
+        username: rawToken.slice(0, colonIdx).trim().toLowerCase(),
+        secret: rawToken.slice(colonIdx + 1),
+      };
+    }
+    const queryUser = url.searchParams.get("user") || url.searchParams.get("username");
+    if (queryUser && rawToken) {
+      return { username: queryUser.trim().toLowerCase(), secret: rawToken };
+    }
+  }
+
+  const queryUser = url.searchParams.get("user") || url.searchParams.get("username");
+  const queryPass =
+    url.searchParams.get("pass") ||
+    url.searchParams.get("password") ||
+    url.searchParams.get("token");
+
+  if (queryUser && queryPass) {
+    return { username: queryUser.trim().toLowerCase(), secret: queryPass };
+  }
+
+  return null;
+}
+
+export async function authenticateUserByKey(
+  creds: { username: string; secret: string },
+  kv: KVNamespace
+): Promise<UserRule | null> {
+  const user = await kv.get<UserRule>(`user:${creds.username}`, "json");
+
+  if (!user) {
+    const dummyComputed = await sha256Hex(`dummysalt${creds.secret}`);
+    timingSafeEqualString(dummyComputed, DUMMY_HASH);
+    return null;
+  }
+
+  const incomingHash = await sha256Hex(`${user.salt}${creds.secret}`);
+  if (timingSafeEqualString(incomingHash, user.secret_hash.toLowerCase())) {
+    return user;
+  }
+
+  return null;
+}
+</file>
+
+<file path="test/tsconfig.json">
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-plugin"
+    ]
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts"]
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}
+</file>
+
+<file path="vitest.config.ts">
+import { defineConfig } from "vitest/config";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
+
+export default defineConfig({
+  plugins: [
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.jsonc" },
+      miniflare: {
+        bindings: {
+          CF_API_TOKEN: "test-cloudflare-api-token",
+          ONBOARD_PREFIX: "onboard-ddns.",
+          CF_ZONE_ID: "zone_default_123",
+        },
+      },
+    }),
+  ],
+});
+</file>
+
+<file path="scripts/ddns-admin.sh">
+#!/usr/bin/env bash
+set -euo pipefail
+
+BINDING="KV"
+
+# Auto-discover KV Namespace ID (<worker-name>-kv)
+KV_ID=$(npx wrangler kv namespace list 2>/dev/null | jq -r '.[] | select(.title | ascii_downcase | endswith("-kv")) | .id' | head -n 1 || true)
+
+if [[ -n "$KV_ID" ]]; then
+  TARGET_ARGS=(--namespace-id="$KV_ID" --remote)
+else
+  TARGET_ARGS=(--binding="$BINDING" --remote)
+fi
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") <command> [arguments]
+
+Commands:
+  seed-config [config.json]             Load config.json into KV (config:settings & zone:map)
+  invite <username> [ttl_hours]         Generate an 8-digit PIN invite (default: 24h)
+  allow-exact <username> <fqdn>         Authorize an exact hostname (e.g., kb.example.com)
+  allow-suffix <username> <suffix>      Authorize a domain suffix (e.g., .vpn.example.net)
+  revoke-host <username> <host_or_suf>  Remove a hostname or suffix from a user
+  show-user <username>                  Display a user's current KV record
+  list-users                            List all registered users
+  list-invites                          List all active pending invites
+  audit [limit]                         Fetch and format recent audit logs (default: 10)
+EOF
+  exit 1
+}
+
+[[ $# -lt 1 ]] && usage
+CMD="$1"
+shift
+
+case "$CMD" in
+  seed-config)
+    FILE="${1:-config.json}"
+    [[ -f "$FILE" ]] || { echo "Error: Config file '$FILE' not found." >&2; exit 1; }
+    # Strip _comment_* keys and zone_map object before writing config:settings
+    SETTINGS_JSON=$(jq -c 'with_entries(select(.key | startswith("_comment") | not)) | del(.zone_map)' "$FILE")
+    npx wrangler kv key put "config:settings" "$SETTINGS_JSON" "${TARGET_ARGS[@]}"
+    echo "Seeded config:settings from $FILE"
+
+    # If zone_map is defined in the config file, seed zone:map automatically
+    if jq -e '.zone_map and (.zone_map | type == "object")' "$FILE" >/dev/null 2>&1; then
+      ZONE_MAP_JSON=$(jq -c '.zone_map' "$FILE")
+      npx wrangler kv key put "zone:map" "$ZONE_MAP_JSON" "${TARGET_ARGS[@]}"
+      echo "Seeded zone:map from $FILE"
+    fi
+    ;;
+
+  invite)
+    USER="${1:-}"
+    TTL_HOURS="${2:-24}"
+    [[ -z "$USER" ]] && { echo "Error: username required"; usage; }
+    USER=$(echo "$USER" | tr '[:upper:]' '[:lower:]')
+
+    PIN=$(od -An -N4 -tu4 /dev/urandom | awk '{printf "%08d", $1 % 100000000}')
+    TTL_SEC=$(( TTL_HOURS * 3600 ))
+    EXP_MS=$(( ( $(date +%s) + TTL_SEC ) * 1000 ))
+
+    PAYLOAD=$(jq -nc --arg pin "$PIN" '{pin: $pin}')
+    META=$(jq -nc --argjson exp "$EXP_MS" '{exp: $exp}')
+
+    npx wrangler kv key put "invite:${USER}" "$PAYLOAD" \
+      --ttl="$TTL_SEC" \
+      --metadata="$META" \
+      "${TARGET_ARGS[@]}" > /dev/null
+
+    echo "=========================================="
+    echo " Invite Created for: ${USER}"
+    echo " 8-Digit PIN:        ${PIN}"
+    echo " Expires in:         ${TTL_HOURS} hours"
+    echo "=========================================="
+    ;;
+
+  allow-exact|allow-suffix)
+    USER="${1:-}"
+    TARGET="${2:-}"
+    [[ -z "$USER" || -z "$TARGET" ]] && { echo "Error: username and target required"; usage; }
+    USER=$(echo "$USER" | tr '[:upper:]' '[:lower:]')
+    TARGET=$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')
+    KEY="user:${USER}"
+
+    RAW=$(npx wrangler kv key get "$KEY" "${TARGET_ARGS[@]}" 2>/dev/null || true)
+    [[ -z "$RAW" ]] && { echo "Error: User '${USER}' not found in KV."; exit 1; }
+
+    if [[ "$CMD" == "allow-exact" ]]; then
+      UPDATED=$(echo "$RAW" | jq --arg h "$TARGET" '.allowed_exact = ((.allowed_exact + [$h]) | unique)')
+    else
+      UPDATED=$(echo "$RAW" | jq --arg s "$TARGET" '.allowed_suffixes = ((.allowed_suffixes + [$s]) | unique)')
+    fi
+
+    npx wrangler kv key put "$KEY" "$UPDATED" "${TARGET_ARGS[@]}" > /dev/null
+    echo "$UPDATED" | jq '{id, allowed_exact, allowed_suffixes}'
+    ;;
+
+  revoke-host)
+    USER="${1:-}"
+    TARGET="${2:-}"
+    [[ -z "$USER" || -z "$TARGET" ]] && { echo "Error: username and target required"; usage; }
+    USER=$(echo "$USER" | tr '[:upper:]' '[:lower:]')
+    TARGET=$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')
+    KEY="user:${USER}"
+
+    RAW=$(npx wrangler kv key get "$KEY" "${TARGET_ARGS[@]}" 2>/dev/null || true)
+    [[ -z "$RAW" ]] && { echo "Error: User '${USER}' not found."; exit 1; }
+
+    UPDATED=$(echo "$RAW" | jq --arg t "$TARGET" '.allowed_exact -= [$t] | .allowed_suffixes -= [$t]')
+    npx wrangler kv key put "$KEY" "$UPDATED" "${TARGET_ARGS[@]}" > /dev/null
+    echo "$UPDATED" | jq '{id, allowed_exact, allowed_suffixes}'
+    ;;
+
+  show-user)
+    USER="${1:-}"
+    [[ -z "$USER" ]] && { echo "Error: username required"; usage; }
+    npx wrangler kv key get "user:${USER}" "${TARGET_ARGS[@]}" | jq .
+    ;;
+
+  list-users)
+    npx wrangler kv key list --prefix="user:" "${TARGET_ARGS[@]}" | jq -r '.[].name'
+    ;;
+
+  list-invites)
+    npx wrangler kv key list --prefix="invite:" "${TARGET_ARGS[@]}" | jq .
+    ;;
+
+  audit)
+    LIMIT="${1:-10}"
+    KEYS=$(npx wrangler kv key list --prefix="audit:" "${TARGET_ARGS[@]}" | jq -r "sort_by(.name) | reverse | .[:${LIMIT}][].name")
+    for k in $KEYS; do
+      npx wrangler kv key get "$k" "${TARGET_ARGS[@]}" | jq -c .
+    done
+    ;;
+
+  *)
+    usage
+    ;;
+esac
+</file>
+
+<file path="src/index.ts">
+export * from "./types";
+export * from "./cf-dns";
+export * from "./security";
+export * from "./onboard";
+
+import { Env, ServiceConfig } from "./types";
+import { ONBOARD_HTML } from "./onboard-html";
+import { hasActiveInvite, handleOnboardSubmit } from "./onboard";
+import { extractCredentials, authenticateUserByKey } from "./security";
+import { isHostAllowed, isValidPublicIp, reconcileDualStackRecords } from "./cf-dns";
+
+function textResponse(body: string, status: number): Response {
+  return new Response(body, {
+    status,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+function isOnboardRequest(url: URL, env: Env): boolean {
+  const host = url.hostname.toLowerCase();
+  if (env.ONBOARD_HOST && host === env.ONBOARD_HOST.toLowerCase()) {
+    return true;
+  }
+  const prefix = (env.ONBOARD_PREFIX || "onboard-ddns.").toLowerCase();
+  return host.startsWith(prefix);
+}
+
+async function resolveZoneAndConfig(
+  hostname: string,
+  env: Env
+): Promise<{ zoneId: string | null; serviceConfig: ServiceConfig | null }> {
+  const [zoneMap, serviceConfig] = await Promise.all([
+    env.KV.get<Record<string, string>>("zone:map", "json"),
+    env.KV.get<ServiceConfig>("config:settings", "json"),
+  ]);
+
+  const combinedDomains: Record<string, string> = {
+    ...(serviceConfig?.ALLOW_LIST_DOMAINS || {}),
+    ...(zoneMap || {}),
+  };
+
+  for (const [domain, id] of Object.entries(combinedDomains)) {
+    const cleanDomain = domain.toLowerCase().replace(/^\./, "");
+    if (hostname === cleanDomain || hostname.endsWith(`.${cleanDomain}`)) {
+      return { zoneId: id, serviceConfig };
+    }
+  }
+
+  return { zoneId: env.CF_ZONE_ID || null, serviceConfig };
+}
+
+function parseDualStackIps(
+  request: Request,
+  url: URL
+): { ipv4: string | null; ipv6: string | null; isAutoDetected: boolean; hasInvalidIp: boolean } {
+  const paramIp = url.searchParams.get("ip");
+  const paramIpv6 = url.searchParams.get("ipv6");
+  const paramMyIp = url.searchParams.get("myip");
+
+  let ipv4: string | null = null;
+  let ipv6: string | null = null;
+  let hasInvalidIp = false;
+
+  if (paramIp !== null || paramIpv6 !== null) {
+    if (paramIp && paramIp.trim() !== "") {
+      const candidate4 = paramIp.trim();
+      if (isValidPublicIp(candidate4, "A")) ipv4 = candidate4;
+      else hasInvalidIp = true;
+    }
+    if (paramIpv6 && paramIpv6.trim() !== "") {
+      const candidate6 = paramIpv6.trim();
+      if (isValidPublicIp(candidate6, "AAAA")) ipv6 = candidate6;
+      else hasInvalidIp = true;
+    }
+    return { ipv4, ipv6, isAutoDetected: false, hasInvalidIp };
+  }
+
+  if (paramMyIp !== null && paramMyIp.trim() !== "") {
+    const parts = paramMyIp.split(",").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (isValidPublicIp(part, "A")) ipv4 = part;
+      else if (isValidPublicIp(part, "AAAA")) ipv6 = part;
+      else hasInvalidIp = true;
+    }
+    return { ipv4, ipv6, isAutoDetected: false, hasInvalidIp };
+  }
+
+  const cfIp = (request.headers.get("CF-Connecting-IP") || "").trim();
+  if (isValidPublicIp(cfIp, "A")) {
+    ipv4 = cfIp;
+  } else if (isValidPublicIp(cfIp, "AAAA")) {
+    ipv6 = cfIp;
+  } else {
+    hasInvalidIp = true;
+  }
+
+  return { ipv4, ipv6, isAutoDetected: true, hasInvalidIp };
+}
+
+export async function ddnsHandler(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
+  const url = new URL(request.url);
+
+  // 1. Domain-Agnostic Onboarding Subdomain (matches onboard-ddns.*)
+  if (isOnboardRequest(url, env)) {
+    if (!(await hasActiveInvite(env.KV))) {
+      return new Response(null, { status: 404 });
+    }
+
+    if (url.pathname === "/" && request.method === "GET") {
+      return new Response(ONBOARD_HTML, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+
+    if ((url.pathname === "/" || url.pathname === "/onboard") && request.method === "POST") {
+      return handleOnboardSubmit(request, env, ctx);
+    }
+
+    return new Response(null, { status: 404 });
+  }
+
+  // 2. DDNS Update Endpoint
+  if (url.pathname === "/nic/update" || url.pathname === "/") {
+    const creds = extractCredentials(request, url);
+    if (!creds) {
+      return new Response("badauth", {
+        status: 401,
+        headers: { "Content-Type": "text/plain", "WWW-Authenticate": 'Basic realm="DDNS"' },
+      });
+    }
+
+    const user = await authenticateUserByKey(creds, env.KV);
+    if (!user) return textResponse("badauth", 403);
+
+    const rawHost = url.searchParams.get("hostname");
+    if (!rawHost) return textResponse("notfqdn", 400);
+    const hostname = rawHost.trim().toLowerCase().replace(/\.$/, "");
+
+    const { zoneId, serviceConfig } = await resolveZoneAndConfig(hostname, env);
+    if (!zoneId || !isHostAllowed(hostname, user, serviceConfig)) {
+      return textResponse("nohost", 403);
+    }
+
+    const { ipv4, ipv6, isAutoDetected, hasInvalidIp } = parseDualStackIps(request, url);
+    if (hasInvalidIp || (!ipv4 && !ipv6 && isAutoDetected)) {
+      return textResponse("dnserr", 400);
+    }
+
+    try {
+      const result = await reconcileDualStackRecords(
+        zoneId,
+        env.CF_API_TOKEN,
+        hostname,
+        ipv4,
+        ipv6,
+        isAutoDetected
+      );
+      return textResponse(result.summary, 200);
+    } catch {
+      return textResponse("911", 502);
+    }
+  }
+
+  return textResponse("notfound", 404);
+}
+
+export default {
+  fetch: ddnsHandler,
+};
+</file>
+
+<file path="src/onboard.ts">
+import { Env, InviteRecord, UserRule, AuditEntry } from "./types";
+import {
+  sha256Hex,
+  generateAlphanumeric,
+  generateHex,
+  timingSafeEqualString,
+  validatePasswordComplexity,
+} from "./security";
+
+const MAX_PIN_ATTEMPTS = 3;
+const AUDIT_TTL_SECONDS = 90 * 86400;
+const DEFAULT_INVITE_TTL_SECONDS = 86400;
+
+function jsonResponse(data: unknown, status: number): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
+export async function hasActiveInvite(kv: KVNamespace): Promise<boolean> {
+  try {
+    const listResult = await kv.list({ prefix: "invite:", limit: 1 });
+    return listResult.keys.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function writeAuditLog(kv: KVNamespace, entry: AuditEntry): Promise<void> {
+  try {
+    const key = `audit:${entry.timestamp}:${generateHex(4)}`;
+    await kv.put(key, JSON.stringify(entry), { expirationTtl: AUDIT_TTL_SECONDS });
+  } catch {
+    // Ignore telemetry write errors
+  }
+}
+
+export async function handleOnboardSubmit(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
+  const clientIp = request.headers.get("CF-Connecting-IP") || "unknown";
+  const country = request.headers.get("CF-IPCountry") || "unknown";
+  const userAgent = request.headers.get("User-Agent") || "unknown";
+
+  const isBlocked = await env.KV.get(`blocked_ip:${clientIp}`);
+  if (isBlocked !== null) {
+    return jsonResponse({ error: "Access denied." }, 403);
+  }
+
+  let body: { username?: string; pin?: string; mode?: string; password?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid request payload." }, 400);
+  }
+
+  const username = (body.username || "").trim().toLowerCase();
+  const pin = (body.pin || "").trim();
+  const mode = body.mode === "password" ? "password" : "token";
+
+  if (!/^[a-z0-9_-]{2,32}$/.test(username) || !/^\d{8}$/.test(pin)) {
+    return jsonResponse({ error: "Invalid username or 8-digit PIN." }, 400);
+  }
+
+  const inviteKey = `invite:${username}`;
+  const userKey = `user:${username}`;
+
+  const [inviteWithMeta, existingUser] = await Promise.all([
+    env.KV.getWithMetadata<InviteRecord, { exp?: number }>(inviteKey, "json"),
+    env.KV.get<UserRule>(userKey, "json"),
+  ]);
+
+  const invite = inviteWithMeta.value;
+
+  if (!invite) {
+    ctx.waitUntil(
+      writeAuditLog(env.KV, {
+        timestamp: new Date().toISOString(),
+        event: "unknown_or_expired_invite",
+        username,
+        ip: clientIp,
+        country,
+        user_agent: userAgent,
+      })
+    );
+    return jsonResponse({ error: "Invalid or expired username/PIN." }, 403);
+  }
+
+  if (existingUser) {
+    return jsonResponse({ error: "User already exists. Contact admin to reset." }, 409);
+  }
+
+  if (!timingSafeEqualString(invite.pin, pin)) {
+    const attempts = (invite.attempts || 0) + 1;
+
+    if (attempts >= MAX_PIN_ATTEMPTS) {
+      await env.KV.delete(inviteKey);
+      ctx.waitUntil(
+        writeAuditLog(env.KV, {
+          timestamp: new Date().toISOString(),
+          event: "invite_burned_max_attempts",
+          username,
+          ip: clientIp,
+          country,
+          user_agent: userAgent,
+        })
+      );
+      return jsonResponse(
+        { error: "Too many failed attempts. This invite has been locked and deleted." },
+        403
+      );
+    }
+
+    const remainingTtl = inviteWithMeta.metadata?.exp
+      ? Math.max(60, Math.floor((inviteWithMeta.metadata.exp - Date.now()) / 1000))
+      : DEFAULT_INVITE_TTL_SECONDS;
+
+    invite.attempts = attempts;
+    await env.KV.put(inviteKey, JSON.stringify(invite), {
+      expirationTtl: remainingTtl,
+      metadata: inviteWithMeta.metadata,
+    });
+
+    const remaining = MAX_PIN_ATTEMPTS - attempts;
+    return jsonResponse(
+      { error: `Invalid username or PIN. ${remaining} attempt(s) remaining.` },
+      403
+    );
+  }
+
+  let finalSecret = "";
+  if (mode === "token") {
+    finalSecret = generateAlphanumeric(16);
+  } else {
+    const pw = body.password || "";
+    const pwError = validatePasswordComplexity(pw);
+    if (pwError) return jsonResponse({ error: pwError }, 400);
+    finalSecret = pw;
+  }
+
+  const salt = generateHex(8);
+  const secret_hash = await sha256Hex(`${salt}${finalSecret}`);
+
+  const newUser: UserRule = {
+    id: username,
+    salt,
+    secret_hash,
+    allowed_exact: [],
+    allowed_suffixes: [],
+  };
+
+  await Promise.all([
+    env.KV.put(userKey, JSON.stringify(newUser, null, 2)),
+    env.KV.delete(inviteKey),
+  ]);
+
+  ctx.waitUntil(
+    writeAuditLog(env.KV, {
+      timestamp: new Date().toISOString(),
+      event: "onboard_success",
+      username,
+      ip: clientIp,
+      country,
+      user_agent: userAgent,
+    })
+  );
+
+  return jsonResponse({ username, secret: finalSecret, mode }, 200);
+}
+</file>
+
+<file path="src/types.ts">
+export interface Env {
+  CF_API_TOKEN: string;
+  CF_ZONE_ID?: string;
+  KV: KVNamespace;
+  ONBOARD_PREFIX?: string; // Defaults to "onboard-ddns." (domain-agnostic)
+  ONBOARD_HOST?: string;   // Optional exact hostname override
+}
+
+export interface ServiceConfig {
+  ALLOWED_TRIES?: number;
+  PENALTY_TYPE?: "logarithmic" | "linear" | "flat";
+  BASE_PENALTY_SECONDS?: number;
+  MAX_PENALTY_SECONDS?: number;
+  ALLOW_CREATION?: boolean;
+  ALLOW_LIST_DOMAINS?: Record<string, string>;
+  ALLOW_LIST_PREFIXES?: string[];
+  BLOCK_LIST?: string[];
+  MAX_ZONE_RECORDS?: number;
+  ALERT_WEBHOOK_URL?: string;
+}
+
+export interface UserRule {
+  id: string;
+  salt: string;
+  secret_hash: string;
+  allowed_exact: string[];
+  allowed_suffixes: string[];
+}
+
+export interface InviteRecord {
+  pin: string;
+  attempts?: number;
+}
+
+export interface AuditEntry {
+  timestamp: string;
+  event: string;
+  username: string;
+  ip: string;
+  country: string;
+  user_agent: string;
+}
+
+export interface CloudflareDnsRecord {
+  id: string;
+  type: "A" | "AAAA";
+  name: string;
+  content: string;
+  proxied: boolean;
+}
+
+export interface CloudflareListResponse {
+  success: boolean;
+  result: CloudflareDnsRecord[];
+}
+</file>
+
+<file path="test/ddns.spec.ts">
+import {
+  env,
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { ddnsHandler } from "../src/index";
+import { sha256Hex } from "../src/security";
+import type { Env, UserRule } from "../src/types";
+
+declare module "cloudflare:test" {
+  interface ProvidedEnv extends Env {}
+}
+
+const ZONE_ID = "zone_example_com_111";
+const HOSTNAME = "kb.example.com";
+
+describe("cloudflare-ddns-service workerd suite", () => {
+  beforeEach(async () => {
+    await env.KV.put(
+      "zone:map",
+      JSON.stringify({ "example.com": ZONE_ID })
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps onboarding portal dark (404) when no active invite exists", async () => {
+    const req = new Request("https://onboard-ddns.example.com/");
+    const ctx = createExecutionContext();
+    const res = await ddnsHandler(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("completes PIN onboarding, burns invite key, and creates isolated user:<id> record", async () => {
+    await env.KV.put(
+      "invite:omada-router",
+      JSON.stringify({ pin: "84920174" }),
+      { expirationTtl: 3600 }
+    );
+
+    const getCtx = createExecutionContext();
+    const getRes = await ddnsHandler(
+      new Request("https://onboard-ddns.example.com/"),
+      env,
+      getCtx
+    );
+    await waitOnExecutionContext(getCtx);
+    expect(getRes.status).toBe(200);
+
+    const postCtx = createExecutionContext();
+    const postRes = await ddnsHandler(
+      new Request("https://onboard-ddns.example.com/onboard", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.10",
+        },
+        body: JSON.stringify({
+          username: "omada-router",
+          pin: "84920174",
+          mode: "token",
+        }),
+      }),
+      env,
+      postCtx
+    );
+    await waitOnExecutionContext(postCtx);
+
+    expect(postRes.status).toBe(200);
+    const data = (await postRes.json()) as { username: string; secret: string };
+    expect(data.username).toBe("omada-router");
+    expect(data.secret).toHaveLength(16);
+
+    const burnedInvite = await env.KV.get("invite:omada-router");
+    expect(burnedInvite).toBeNull();
+
+    const storedUser = await env.KV.get<UserRule>(
+      "user:omada-router",
+      "json"
+    );
+    expect(storedUser).not.toBeNull();
+    const expectedHash = await sha256Hex(`${storedUser!.salt}${data.secret}`);
+    expect(storedUser!.secret_hash).toBe(expectedHash);
+  });
+
+  it("reconciles explicit dual-stack IPs and deletes stale AAAA record when IPv6 is dropped", async () => {
+    const salt = "a1b2c3d4e5f60718";
+    const secret = "MyRouterToken123";
+    const secret_hash = await sha256Hex(`${salt}${secret}`);
+
+    await env.KV.put(
+      "user:omada",
+      JSON.stringify({
+        id: "omada",
+        salt,
+        secret_hash,
+        allowed_exact: [HOSTNAME],
+        allowed_suffixes: [],
+      } satisfies UserRule)
+    );
+
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method || (input instanceof Request ? input.method : "GET");
+      calls.push({ url, method });
+
+      if (method === "GET" && url.includes(`/zones/${ZONE_ID}/dns_records`)) {
+        return Response.json({
+          success: true,
+          result: [
+            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "198.51.100.1", proxied: false },
+            { id: "rec_aaaa_stale", type: "AAAA", name: HOSTNAME, content: "2605:a601:1234::1", proxied: false },
+          ],
+        });
+      }
+      if (method === "PUT" && url.endsWith("/dns_records/rec_a_1")) {
+        return Response.json({ success: true, result: {} });
+      }
+      if (method === "DELETE" && url.endsWith("/dns_records/rec_aaaa_stale")) {
+        return Response.json({ success: true, result: { id: "rec_aaaa_stale" } });
+      }
+      throw new Error(`Unexpected fetch: ${method} ${url}`);
+    });
+
+    const req = new Request(
+      `https://ddns.example.net/?hostname=${HOSTNAME}&ip=136.36.2.99&ipv6=`,
+      { headers: { Authorization: `Basic ${btoa(`omada:${secret}`)}` } }
+    );
+    const ctx = createExecutionContext();
+    const res = await ddnsHandler(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("good 136.36.2.99");
+    expect(calls).toHaveLength(3);
+    expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/rec_aaaa_stale"))).toBe(true);
+  });
+
+  it("preserves existing AAAA record when updating A record via passive CF-Connecting-IP auto-detect", async () => {
+    const salt = "1122334455667788";
+    const secret = "PassiveToken9999";
+    const secret_hash = await sha256Hex(`${salt}${secret}`);
+
+    await env.KV.put(
+      "user:pi-node",
+      JSON.stringify({
+        id: "pi-node",
+        salt,
+        secret_hash,
+        allowed_exact: [HOSTNAME],
+        allowed_suffixes: [],
+      } satisfies UserRule)
+    );
+
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method || (input instanceof Request ? input.method : "GET");
+      calls.push({ url, method });
+
+      if (method === "GET" && url.includes(`/zones/${ZONE_ID}/dns_records`)) {
+        return Response.json({
+          success: true,
+          result: [
+            { id: "rec_a_1", type: "A", name: HOSTNAME, content: "198.51.100.1", proxied: false },
+            { id: "rec_aaaa_keep", type: "AAAA", name: HOSTNAME, content: "2605:a601:9999::5", proxied: false },
+          ],
+        });
+      }
+      if (method === "PUT" && url.endsWith("/dns_records/rec_a_1")) {
+        return Response.json({ success: true, result: {} });
+      }
+      throw new Error(`Unexpected fetch (e.g. unwanted DELETE): ${method} ${url}`);
+    });
+
+    const req = new Request(`https://ddns.example.net/?hostname=${HOSTNAME}`, {
+      headers: {
+        Authorization: `Bearer pi-node:${secret}`,
+        "CF-Connecting-IP": "136.36.9.250",
+      },
+    });
+
+    const ctx = createExecutionContext();
+    const res = await ddnsHandler(req, env, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("good 136.36.9.250");
+    expect(calls).toHaveLength(2);
+  });
+});
+</file>
+
+<file path="LICENSE">
+MIT License
+
+Copyright (c) 2026 mamanakis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</file>
+
+<file path="package.json">
+{
+  "name": "cloudflare-ddns-service",
+  "version": "1.0.0",
+  "description": "Multi-tenant, dual-stack (A/AAAA) DynDNS2 Cloudflare Worker service with KV onboarding and automatic stale record pruning.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./cf-dns": {
+      "types": "./dist/cf-dns.d.ts",
+      "import": "./dist/cf-dns.js"
+    },
+    "./security": {
+      "types": "./dist/security.d.ts",
+      "import": "./dist/security.js"
+    },
+    "./onboard": {
+      "types": "./dist/onboard.d.ts",
+      "import": "./dist/onboard.js"
+    }
+  },
+  "bin": {
+    "ddns-admin": "./scripts/ddns-admin.sh"
+  },
+  "files": [
+    "dist",
+    "scripts/ddns-admin.sh",
+    "config.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "ddns",
+    "dyndns2",
+    "omada",
+    "mikrotik",
+    "ubiquiti",
+    "ipv6",
+    "dual-stack"
+  ],
+  "author": "Michael Mamanakis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mamanakis/cloudflare-ddns-service.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.0",
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261110.1": true
+  }
+}
+</file>
+
+<file path="wrangler.jsonc">
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-ddns-service",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": false,
+  "preview_urls": true,
+  "vars": {
+    "ONBOARD_PREFIX": "onboard-ddns."
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV"
+    }
+  ]
+}
+</file>
+
+<file path=".gitignore">
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage (https://gruntjs.com/creating-plugins#storing-task-files)
+.grunt
+
+# Bower dependency directory (https://bower.io/)
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Snowpack dependency directory (https://snowpack.dev/)
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+out
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+.output
+
+# Gatsby files
+.cache/
+# Comment in the public line in if your project uses Gatsby and not Next.js
+# https://nextjs.org/blog/next-9-1#public-directory-support
+# public
+
+# vuepress build output
+.vuepress/dist
+
+# vuepress v2.x temp directory
+.temp
+
+# Sveltekit cache directory
+.svelte-kit/
+
+# vitepress build output
+**/.vitepress/dist
+
+# vitepress cache directory
+**/.vitepress/cache
+
+# Docusaurus cache and generated files
+.docusaurus
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# Firebase cache directory
+.firebase/
+
+# TernJS port file
+.tern-port
+
+# Stores Visual Studio Code versions used for testing Visual Studio Code extensions
+.vscode-test
+
+# pnpm
+.pnpm-store
+
+# yarn v3
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Vite files
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
+
+# Astro generated types
+.astro/
+
+# Turbo Repo
+.turbo
+
+# Cloudflare Worker directories
+.wrangler/
+.dev.vars
+
+# Users config file
+config.json
+
+# wrangler deploy file with injected domains from repo env vars
+wrangler.deploy.jsonc
+</file>
+
+<file path=".github/workflows/ci.yml">
+name: Online CI & Cloud Edge Smoke Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-build:
+    name: Typecheck, Workerd Suite & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run workerd integration tests
+        run: npm test
+
+      - name: Verify package build output
+        run: npm run build
+
+  edge-smoke-test:
+    name: Deploy Edge Preview & Live Curl Smoke Test
+    needs: unit-and-build
+    # Only run live Cloudflare API steps when secrets are available (push to main or internal PRs)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN_DEPLOY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build deployment Wrangler config & config.json from DDNS_ZONE_MAP
+        env:
+          DDNS_ZONE_MAP: ${{ vars.DDNS_ZONE_MAP }}
+        run: |
+          if [ -n "$DDNS_ZONE_MAP" ]; then
+            jq --argjson zmap "$DDNS_ZONE_MAP" '.zone_map = $zmap' default-config.json > config.json
+            jq --argjson zmap "$DDNS_ZONE_MAP" '
+              ($zmap | keys_unsorted) as $d |
+              . + {
+                routes: (
+                  ($d | map({ pattern: ("ddns." + .), custom_domain: true })) +
+                  ($d | map({ pattern: ((.vars.ONBOARD_PREFIX // "onboard-ddns.") + .), custom_domain: true }))
+                )
+              }
+            ' wrangler.jsonc > wrangler.deploy.jsonc
+          else
+            cp default-config.json config.json
+            cp wrangler.jsonc wrangler.deploy.jsonc
+          fi
+
+      - name: Ensure base Worker exists, auto-provision KV & sync runtime secret
+        run: |
+          npx wrangler deploy --config wrangler.deploy.jsonc --keep-vars
+          if [ -n "${{ secrets.CF_API_TOKEN }}" ]; then
+            printf "%s" "${{ secrets.CF_API_TOKEN }}" | npx wrangler secret put CF_API_TOKEN --config wrangler.deploy.jsonc
+          fi
+
+      - name: Upload Worker Preview Version & Extract Preview URL
+        id: preview
+        run: |
+          OUTPUT=$(npx wrangler versions upload --preview-alias "ci-${GITHUB_RUN_ID}")
+          echo "$OUTPUT"
+          PREVIEW_URL=$(echo "$OUTPUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | tail -n 1)
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::Failed to extract Preview URL from Wrangler output"
+            exit 1
+          fi
+          echo "url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+          echo "Uploaded live preview to: $PREVIEW_URL"
+
+      - name: Discover Auto-Provisioned KV Namespace ID
+        id: kv
+        run: |
+          KV_ID=$(npx wrangler kv namespace list | jq -r '.[] | select(.title == "cloudflare-ddns-service-kv" or (.title | ascii_downcase | endswith("-kv"))) | .id' | head -n 1)
+          if [ -z "$KV_ID" ]; then
+            echo "::error::Could not locate auto-provisioned KV namespace"
+            exit 1
+          fi
+          echo "id=$KV_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Seed config into KV
+        env:
+          DDNS_ZONE_MAP: ${{ vars.DDNS_ZONE_MAP }}
+        run: |
+          if [ ! -f config.json ]; then
+            if [ -n "$DDNS_ZONE_MAP" ]; then
+              jq --argjson zmap "$DDNS_ZONE_MAP" '
+                .zone_map = $zmap |
+                .allowed_domains = ($zmap | keys)
+              ' default-config.json > config.json
+            else
+              cp default-config.json config.json
+            fi
+          fi
+          chmod +x scripts/ddns-admin.sh
+          ./scripts/ddns-admin.sh seed-config config.json
+
+      - name: Run Live Edge Curl Assertions (Auth, Protocol & Onboarding)
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          KV_ID: ${{ steps.kv.outputs.id }}
+        run: |
+          DOMAIN=$(jq -r '.zone_map | keys_unsorted[0] // "example.com"' config.json)
+          DOMAIN="${DOMAIN:-example.com}"
+          set -euo pipefail
+          TEST_USER="ci-smoke-${GITHUB_RUN_ID}"
+          INVITE_KEY="invite:${TEST_USER}"
+          USER_KEY="user:${TEST_USER}"
+
+          cleanup() {
+            echo "Cleaning up ephemeral KV test keys..."
+            npx wrangler kv key delete "$INVITE_KEY" --namespace-id="$KV_ID" --remote || true
+            npx wrangler kv key delete "$USER_KEY" --namespace-id="$KV_ID" --remote || true
+          }
+          trap cleanup EXIT
+
+          echo "--- Test 1: Unauthenticated request returns 401 badauth ---"
+          HTTP_401=$(curl -s -o /tmp/res1.txt -w "%{http_code}" "${PREVIEW_URL}/nic/update?hostname=ci.${DOMAIN}")
+          BODY_401=$(cat /tmp/res1.txt)
+          [ "$HTTP_401" = "401" ] && [ "$BODY_401" = "badauth" ] || {
+            echo "::error::Expected 401 badauth, got ${HTTP_401} (${BODY_401})"
+            exit 1
+          }
+
+          echo "--- Test 2: Invalid credentials return 403 badauth (Constant-Time Path) ---"
+          HTTP_403=$(curl -s -o /tmp/res2.txt -w "%{http_code}" -u "${TEST_USER}:wrongpass" "${PREVIEW_URL}/nic/update?hostname=ci.${DOMAIN}")
+          BODY_403=$(cat /tmp/res2.txt)
+          [ "$HTTP_403" = "403" ] && [ "$BODY_403" = "badauth" ] || {
+            echo "::error::Expected 403 badauth, got ${HTTP_403} (${BODY_403})"
+            exit 1
+          }
+
+          echo "--- Test 3: Seed temporary user and verify unauthorized host returns 403 nohost ---"
+          HASH=$(printf "cisalt12citoken123456789" | sha256sum | awk '{print $1}')
+          USER_JSON=$(jq -nc --arg id "$TEST_USER" --arg h "$HASH" '{
+            id: $id,
+            salt: "cisalt12",
+            secret_hash: $h,
+            allowed_exact: ["ci-allowed.${DOMAIN}"],
+            allowed_suffixes: []
+          }')
+          npx wrangler kv key put "$USER_KEY" "$USER_JSON" --namespace-id="${{ steps.kv.outputs.id }}" --remote
+
+          sleep 2
+          HTTP_NOHOST=$(curl -s -o /tmp/res3.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-forbidden.${DOMAIN}")
+          BODY_NOHOST=$(cat /tmp/res3.txt)
+          [ "$HTTP_NOHOST" = "403" ] && [ "$BODY_NOHOST" = "nohost" ] || {
+            echo "::error::Expected 403 nohost, got ${HTTP_NOHOST} (${BODY_NOHOST})"
+            exit 1
+          }
+
+          echo "--- Test 4: Verify RFC1918 / Bogon IP rejection returns 400 dnserr ---"
+          HTTP_DNSERR=$(curl -s -o /tmp/res4.txt -w "%{http_code}" -u "${TEST_USER}:citoken123456789" "${PREVIEW_URL}/nic/update?hostname=ci-allowed.${DOMAIN}&ip=192.168.1.50")
+          BODY_DNSERR=$(cat /tmp/res4.txt)
+          [ "$HTTP_DNSERR" = "400" ] && [ "$BODY_DNSERR" = "dnserr" ] || {
+            echo "::error::Expected 400 dnserr for RFC1918 IP, got ${HTTP_DNSERR} (${BODY_DNSERR})"
+            exit 1
+          }
+
+          echo "--- Test 5: Verify Onboarding Portal stays dark (404), accepts valid PIN, and goes dark again ---"
+          HTTP_DARK1=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          [ "$HTTP_DARK1" = "404" ] || {
+            echo "::error::Expected 404 dark onboarding portal when no invite exists, got ${HTTP_DARK1}"
+            exit 1
+          }
+
+          npx wrangler kv key put "$INVITE_KEY" '{"pin":"99887766"}' --namespace-id="${{ steps.kv.outputs.id }}" --ttl=300 --remote
+          sleep 2
+
+          ONBOARD_RES=$(curl -s -w "\n%{http_code}" -X POST "${PREVIEW_URL}/onboard" \
+            -H "Host: onboard-ddns.${DOMAIN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${TEST_USER}\",\"pin\":\"99887766\",\"mode\":\"token\"}")
+          HTTP_ONBOARD=$(echo "$ONBOARD_RES" | tail -n1)
+          ONBOARD_BODY=$(echo "$ONBOARD_RES" | sed '$d')
+          [ "$HTTP_ONBOARD" = "200" ] && echo "$ONBOARD_BODY" | jq -e '.secret | length == 16' >/dev/null || {
+            echo "::error::Expected 200 and 16-char secret from /onboard, got ${HTTP_ONBOARD} (${ONBOARD_BODY})"
+            exit 1
+          }
+
+          HTTP_DARK2=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: onboard-ddns.${DOMAIN}" "${PREVIEW_URL}/")
+          [ "$HTTP_DARK2" = "404" ] || {
+            echo "::error::Expected onboarding portal to return to 404 after invite burned, got ${HTTP_DARK2}"
+            exit 1
+          }
+
+          echo "All live Cloudflare edge smoke assertions passed!"
+</file>
+
+<file path="README.md">
+# cloudflare-ddns-service
+
+A zero-dependency, multi-tenant, dual-stack (`A` / `AAAA`) DynDNS2 Cloudflare Worker package with self-service KV PIN onboarding and automatic stale DNS record pruning.
+
+Designed for routers (**TP-Link Omada**, **MikroTik RouterOS**, **Ubiquiti UniFi**, **OPNsense/pfSense**, and standard `ddclient`/`inadyn` daemons) that only have built in support for DynDNS like DDNS to update IPv4 and IPv6 records across multiple Cloudflare zones without using Cloudflare API tokens.
+
+---
+
+## Key Features
+
+- **Dual-Stack State Reconciliation & Pruning:** Concurrently creates, updates, or deletes `A` and `AAAA` records. When a router explicitly reports an empty IPv6 or IPv4 parameter (e.g., ISP prefix drop), the stale record is automatically pruned from Cloudflare DNS.
+- **Safe Passive Auto-Detection:** If a client calls the endpoint without IP query parameters (`?hostname=node.example.com`), the Worker detects the connecting IP via `CF-Connecting-IP` and updates the corresponding `A` or `AAAA` record *without* pruning the opposite address family.
+- **$O(1)$ Keyed Authentication & Constant-Time Crypto:** Stores per-user salted SHA-256 credentials under isolated `user:<username>` KV keys. Uses `crypto.subtle.timingSafeEqual` and dummy hash burning to prevent timing side-channels and username enumeration.
+- **Dark Self-Service Onboarding Portal:** Exposes an optional onboarding web UI on a dedicated hostname (`ONBOARD_HOST`). The portal returns an empty `404` unless an active `invite:<username>` key exists in KV.
+- **Multi-Zone Routing:** Maps multiple root domains to their respective Cloudflare Zone IDs via a single `zone:map` KV entry, falling back to `env.CF_ZONE_ID`.
+- **Non-Blocking Telemetry:** Writes auto-expiring (`audit:<timestamp>:<id>`) security events via `ctx.waitUntil()` with zero impact on response latency.
+
+---
+
+## Installation & GitOps Wrapper Usage
+
+Install the package in your Cloudflare Worker project or GitOps monorepo:
+
+```bash
+npm install cloudflare-ddns-service
+</file>
+
+</files>

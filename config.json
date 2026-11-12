@@ -1,16 +1,26 @@
 {
-  "ALLOWED_TRIES": 3,
-  "PENALTY_TYPE": "logarithmic",
-  "BASE_PENALTY_SECONDS": 3600,
-  "MAX_PENALTY_SECONDS": 3600000,
-  "ALLOW_CREATION": true,
-  "ALLOW_LIST_DOMAINS": {
-    ".mamanakis.net": "a2d8bc4d19076082a2709a261da5dbd2",
-    ".mamanakis.com": "aa93a0da2dde746028171d4bfa2da01a",
-    ".mamanakis.org": "97cea0873fc2ef6d9611ab8493fda9a9"
+  "zone_map": {
+    "mamanakis.net": "a2d8bc4d19076082a2709a261da5dbd2",
+    "mamanakis.com": "aa93a0da2dde746028171d4bfa2da01a",
+    "mamanakis.org": "97cea0873fc2ef6d9611ab8493fda9a9"
   },
-  "ALLOW_LIST_PREFIXES": [],
-  "BLOCK_LIST": ["admin", "root", "test", "hack"],
-  "MAX_ZONE_RECORDS": 150,
-  "ALERT_WEBHOOK_URL": "" 
+  "block_list": [
+    "admin",
+    "root",
+    "test",
+    "hack",
+    "onboard-ddns",
+    "ddns"
+  ],
+  "allow_creation": true,
+  "default_ttl": 60,
+  "default_proxied": false,
+  "allow_ipv6_auto_clear": true,
+  "rate_limit_max_fails": 3,
+  "rate_limit_window_sec": 300,
+  "rate_limit_block_sec": 3600,
+  "penalty_type": "logarithmic",
+  "max_penalty_sec": 3600000,
+  "max_zone_records": 150,
+  "alert_webhook_url": ""
 }
